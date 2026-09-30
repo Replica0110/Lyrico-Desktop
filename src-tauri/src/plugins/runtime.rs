@@ -30,6 +30,7 @@ pub(crate) fn invoke(
     plugin: &SourcePlugin,
     function_name: &str,
     request: Value,
+    locale: Option<&str>,
 ) -> Result<Value, String> {
     if !plugin.is_enabled_anywhere() {
         return Err("Plugin is disabled for every search type".to_string());
@@ -73,7 +74,7 @@ pub(crate) fn invoke(
     let started = Instant::now();
     runtime.set_interrupt_handler(Some(Box::new(move || started.elapsed() >= TIMEOUT)));
     let context = Context::full(&runtime).map_err(|error| error.to_string())?;
-    let host = Arc::new(Mutex::new(HostApi::new(plugin)?));
+    let host = Arc::new(Mutex::new(HostApi::new(plugin, locale)?));
 
     context.with(|ctx| {
         let host = Arc::clone(&host);
@@ -122,6 +123,41 @@ pub(crate) fn invoke(
             .map_err(|error| error.to_string()),
             None => Ok(Value::Null),
         }
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn compile_plugin(plugin: &SourcePlugin, locale: Option<&str>) -> Result<(), String> {
+    let scripts = load_scripts(plugin)?;
+    let runtime = Runtime::new().map_err(|error| error.to_string())?;
+    runtime.set_memory_limit(MEMORY_LIMIT);
+    runtime.set_max_stack_size(STACK_LIMIT);
+    let context = Context::full(&runtime).map_err(|error| error.to_string())?;
+    let host = Arc::new(Mutex::new(HostApi::new(plugin, locale)?));
+    context.with(|ctx| {
+        let host = Arc::clone(&host);
+        ctx.globals()
+            .set(
+                "__lyricoHostCall",
+                Func::from(move |name: String, payload: String| {
+                    let result = host
+                        .lock()
+                        .map_err(|_| "Plugin host lock was poisoned".to_string())
+                        .and_then(|mut host| host.call(&name, &payload));
+                    match result {
+                        Ok(value) => json!({ "value": value }).to_string(),
+                        Err(error) => json!({ "error": error }).to_string(),
+                    }
+                }),
+            )
+            .map_err(|error| error.to_string())?;
+        ctx.eval::<(), _>(HOST_BOOTSTRAP)
+            .map_err(|error| format_js_error(&ctx, error))?;
+        for (filename, source) in scripts {
+            ctx.eval::<(), _>(source.as_bytes())
+                .map_err(|error| format!("{filename}: {}", format_js_error(&ctx, error)))?;
+        }
+        Ok(())
     })
 }
 
@@ -178,25 +214,58 @@ struct HostApi {
     plugin_id: String,
     cache_path: PathBuf,
     cache: Map<String, Value>,
+    strings: Option<crate::plugins::i18n::Snapshot>,
 }
 
 impl HostApi {
-    fn new(plugin: &SourcePlugin) -> Result<Self, String> {
+    fn new(plugin: &SourcePlugin, locale: Option<&str>) -> Result<Self, String> {
         let cache_path = Path::new(&plugin.plugin_dir).join(".cache.json");
         let cache = fs::read_to_string(&cache_path)
             .ok()
             .and_then(|value| serde_json::from_str(&value).ok())
             .unwrap_or_default();
+        let preferences = locale.map(|value| vec![value.to_string()]).unwrap_or_default();
+        let strings = if plugin.manifest.i18n.is_some() {
+            crate::plugins::i18n::PluginStrings::load(
+                Path::new(&plugin.plugin_dir),
+                &plugin.manifest,
+            )
+            .ok()
+            .map(|strings| strings.snapshot(&preferences))
+        } else {
+            None
+        };
         Ok(Self {
             plugin_id: plugin.manifest.id.clone(),
             cache_path,
             cache,
+            strings,
         })
     }
 
     fn call(&mut self, name: &str, payload_json: &str) -> Result<Value, String> {
         let payload: Value = serde_json::from_str(payload_json).unwrap_or_else(|_| json!({}));
         match name {
+            "i18n.getLocale" => Ok(Value::String(
+                self.strings
+                    .as_ref()
+                    .map(|snapshot| snapshot.locale().to_string())
+                    .unwrap_or_else(|| "und".to_string()),
+            )),
+            "i18n.t" => {
+                let snapshot = self
+                    .strings
+                    .as_ref()
+                    .ok_or_else(|| "Plugin has no string resources".to_string())?;
+                let args = payload
+                    .get("args")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                snapshot
+                    .format(&string(&payload, "key"), &args)
+                    .map(Value::String)
+            }
             "app.info" => Ok(
                 json!({"name":"Lyrico","packageName":"com.lonx.lyrico.desktop","versionName":env!("CARGO_PKG_VERSION"),"versionCode":1,"buildType":"desktop","debug":cfg!(debug_assertions)}),
             ),
@@ -515,6 +584,8 @@ fn now_ms() -> u64 {
 }
 
 const SUPPORTED_HOST_APIS: &[&str] = &[
+    "i18n.getLocale",
+    "i18n.t",
     "app.info",
     "app.userAgent",
     "runtime.info",
@@ -564,7 +635,8 @@ const HOST_BOOTSTRAP: &str = r#"
  function body(url,value,o){o=opts(o);return {url:String(url||''),body:value==null?'':String(value),bodyBase64:o.bodyBase64,bodyBytes:o.bodyBytes,contentType:o.contentType||'application/json; charset=utf-8',headers:o.headers,connectTimeoutMs:o.connectTimeoutMs,readTimeoutMs:o.readTimeoutMs,followRedirects:o.followRedirects}}
  var app={getInfo:function(){return call('app.info',{})},getUserAgent:function(){return call('app.userAgent',{})}};
  var runtime={getInfo:function(){return call('runtime.info',{})}};
- var map={
+  var map={
+   i18n:{getLocale:function(){return call('i18n.getLocale',{})},t:function(k){return call('i18n.t',{key:String(k||''),args:Array.prototype.slice.call(arguments,1)})}},
   cache:{get:function(k){return call('cache.get',{key:String(k||'')})},set:function(k,v,t){return call('cache.set',{key:String(k||''),value:v==null?'':String(v),ttlMs:Number(t||0)})},remove:function(k){return call('cache.remove',{key:String(k||'')})},clear:function(){return call('cache.clear',{})}},
   crypto:{md5:function(v){return call('crypto.md5',{text:String(v||'')})},aesEcbPkcs5EncryptBase64:function(v,k){return call('crypto.aesEcbPkcs5EncryptBase64',{text:String(v||''),key:String(k||'')})},aesEcbPkcs5EncryptHex:function(v,k){return call('crypto.aesEcbPkcs5EncryptHex',{text:String(v||''),key:String(k||'')})},aesEcbPkcs5DecryptBase64ToText:function(v,k){return call('crypto.aesEcbPkcs5DecryptBase64ToText',{base64:String(v||''),key:String(k||'')})}},
   base64:{encodeText:function(v){return call('base64.encodeText',{text:String(v||'')})},decodeText:function(v){return call('base64.decodeText',{base64:String(v||'')})},dropBytes:function(v,n){return call('base64.dropBytes',{base64:String(v||''),count:Number(n||0)})},decodeBytes:function(v){return call('base64.decodeBytes',{base64:String(v||'')})},encodeBytes:function(v){return call('base64.encodeBytes',{bytes:Array.from(v||[])})},encodeUrlText:function(v){return call('base64.encodeUrlText',{text:String(v||'')})},decodeUrlText:function(v){return call('base64.decodeUrlText',{base64Url:String(v||'')})},encodeUrlBytes:function(v){return call('base64.encodeUrlBytes',{bytes:Array.from(v||[])})},decodeUrlBytes:function(v){return call('base64.decodeUrlBytes',{base64Url:String(v||'')})},toUrl:function(v){return call('base64.toUrl',{base64:String(v||'')})},fromUrl:function(v){return call('base64.fromUrl',{base64Url:String(v||'')})}},
@@ -600,7 +672,7 @@ mod tests {
         .unwrap();
         let plugin = fixture_plugin(&root, true);
 
-        let result = invoke(&plugin, "searchSongs", json!({"keyword":"test"})).unwrap();
+        let result = invoke(&plugin, "searchSongs", json!({"keyword":"test"}), None).unwrap();
 
         assert_eq!(result[0]["title"], "from include");
         assert_eq!(result[0]["artist"], "Lyrico");
@@ -620,10 +692,10 @@ mod tests {
         let mut plugin = fixture_plugin(&root, true);
         plugin.manifest.capabilities.clear();
 
-        let result = invoke(&plugin, "searchSongs", json!({})).unwrap();
+        let result = invoke(&plugin, "searchSongs", json!({}), None).unwrap();
 
-        assert_eq!(result[0]["pluginApiVersion"], 4);
-        assert_eq!(result[0]["hostApiVersion"], 3);
+        assert_eq!(result[0]["pluginApiVersion"], PLUGIN_API_VERSION);
+        assert_eq!(result[0]["hostApiVersion"], HOST_API_VERSION);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -632,9 +704,64 @@ mod tests {
         let root = std::env::temp_dir().join(format!("lyrico-plugin-disabled-{}", now_ms()));
         let plugin = fixture_plugin(&root, false);
         assert_eq!(
-            invoke(&plugin, "searchSongs", json!({})).unwrap_err(),
+            invoke(&plugin, "searchSongs", json!({}), None).unwrap_err(),
             "Plugin is disabled for every search type"
         );
+    }
+
+    #[test]
+    fn exposes_i18n_host_api_and_current_protocol_versions() {
+        use crate::plugins::manifest::PluginI18n;
+        use std::collections::BTreeMap;
+        let root = std::env::temp_dir().join(format!("lyrico-plugin-i18n-runtime-{}", now_ms()));
+        fs::create_dir_all(root.join("locales")).unwrap();
+        fs::create_dir_all(root.join("lib")).unwrap();
+        fs::write(
+            root.join("locales/en.json"),
+            json!({"greeting": "Hello %s"}).to_string(),
+        )
+        .unwrap();
+        fs::write(
+            root.join("locales/zh-Hans.json"),
+            json!({"greeting": "你好 %s"}).to_string(),
+        )
+        .unwrap();
+        fs::write(
+            root.join("source.js"),
+            "function searchSongs(request) { var info = Platform.runtime.getInfo(); return [{ id: Platform.i18n.getLocale(), title: Platform.i18n.t('greeting', 'World'), artist: info.pluginApiVersion + '/' + info.hostApiVersion + '/' + info.supportedHostApis[0] }]; }",
+        )
+        .unwrap();
+        let mut plugin = fixture_plugin(&root, true);
+        plugin.manifest.api_version = 5;
+        plugin.manifest.min_host_api_version = 4;
+        plugin.manifest.i18n = Some(PluginI18n {
+            default_locale: "en".to_string(),
+            resources: BTreeMap::from([
+                ("en".to_string(), "locales/en.json".to_string()),
+                ("zh-Hans".to_string(), "locales/zh-Hans.json".to_string()),
+            ]),
+        });
+
+        let result = invoke(&plugin, "searchSongs", json!({}), Some("zh-Hans")).unwrap();
+        assert_eq!(result[0]["id"], "zh-Hans", "{result}");
+        assert_eq!(result[0]["title"], "你好 World", "{result}");
+        assert_eq!(result[0]["artist"], "5/4/i18n.getLocale", "{result}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn i18n_translations_require_installed_string_resources() {
+        let root = std::env::temp_dir().join(format!("lyrico-plugin-i18n-missing-{}", now_ms()));
+        fs::create_dir_all(root.join("lib")).unwrap();
+        fs::write(
+            root.join("source.js"),
+            "function searchSongs(request) { return [{ id: Platform.i18n.t('greeting') }]; }",
+        )
+        .unwrap();
+        let plugin = fixture_plugin(&root, true);
+        let error = invoke(&plugin, "searchSongs", json!({}), None).unwrap_err();
+        assert!(error.contains("Plugin has no string resources"), "{error}");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -649,6 +776,8 @@ mod tests {
             plugin_dir: root.to_string_lossy().to_string(),
             icon_path: None,
             icon_data_url: None,
+            enabled: true,
+            sort_order: 0,
             source_states,
             installed_at: String::new(),
             updated_at: String::new(),
@@ -658,6 +787,7 @@ mod tests {
             &plugin,
             "searchSongs",
             json!({"keyword":"周杰伦 晴天","page":1,"pageSize":3,"separator":"/","config":{}}),
+            None,
         )
         .unwrap();
         assert!(
@@ -675,6 +805,7 @@ mod tests {
                 &plugin,
                 "getLyrics",
                 json!({"song":result[0],"page":1,"pageSize":3,"config":plugin.config}),
+                None,
             )
             .unwrap();
             let candidates = lyrics.as_array().expect("API4 lyrics must be an array");
@@ -713,6 +844,7 @@ mod tests {
             &plugin,
             "searchSongs",
             json!({"ttml":chinese,"language":"zh-Hans"}),
+            None,
         )
         .unwrap();
         let localized = localized[0]["title"].as_str().unwrap();
@@ -725,12 +857,83 @@ mod tests {
             &plugin,
             "searchSongs",
             json!({"ttml":english,"language":"zh-Hans"}),
+            None,
         )
         .unwrap();
         let unchanged = unchanged[0]["title"].as_str().unwrap();
         assert!(unchanged.contains(">A story</p>"));
         assert!(unchanged.contains("<translation xml:lang=\"zh-Hans\""));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn latest_lyrico_plugins_compile() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../Lyrico-Plugins");
+        if !root.is_dir() {
+            return;
+        }
+        let supported_types = [
+            "text", "textarea", "password", "number", "switch", "dropdown", "markdown",
+        ];
+        let mut seen = 0;
+        for entry in fs::read_dir(&root).unwrap() {
+            let dir = entry.unwrap().path();
+            let manifest_path = dir.join("manifest.json");
+            if !manifest_path.is_file() {
+                continue;
+            }
+            let manifest: PluginManifest = serde_json::from_str(
+                &fs::read_to_string(&manifest_path).unwrap(),
+            )
+            .unwrap_or_else(|error| panic!("{}: {error}", dir.display()));
+            assert!(
+                (1..=PLUGIN_API_VERSION).contains(&manifest.api_version),
+                "{} api {}",
+                manifest.id,
+                manifest.api_version
+            );
+            assert!(
+                manifest.min_host_api_version <= HOST_API_VERSION,
+                "{} host {}",
+                manifest.id,
+                manifest.min_host_api_version
+            );
+            for field in &manifest.config_fields {
+                assert!(
+                    supported_types.contains(&field.field_type.as_str()),
+                    "{} field {} type {}",
+                    manifest.id,
+                    field.key,
+                    field.field_type
+                );
+            }
+            crate::plugins::i18n::validate(&dir, &manifest)
+                .unwrap_or_else(|error| panic!("{}: {error}", manifest.id));
+            let localized = crate::plugins::i18n::localize_manifest(
+                &manifest,
+                &dir,
+                &["zh-CN".to_string()],
+            )
+            .unwrap_or_else(|error| panic!("{}: {error}", manifest.id));
+            assert!(!localized.name.starts_with('@'), "{}", manifest.id);
+            let source_states = enabled_source_states(&manifest.capabilities);
+            let plugin = SourcePlugin {
+                manifest,
+                plugin_dir: dir.to_string_lossy().to_string(),
+                icon_path: None,
+                icon_data_url: None,
+                enabled: true,
+                sort_order: 0,
+                source_states,
+                installed_at: String::new(),
+                updated_at: String::new(),
+                config: json!({}),
+            };
+            compile_plugin(&plugin, Some("zh-CN"))
+                .unwrap_or_else(|error| panic!("{}: {error}", plugin.manifest.id));
+            seen += 1;
+        }
+        assert!(seen >= 7, "expected the Lyrico-Plugins packages, found {seen}");
     }
 
     fn fixture_plugin(root: &Path, enabled: bool) -> SourcePlugin {
@@ -748,6 +951,7 @@ mod tests {
             icon: None,
             capabilities: vec!["searchSongs".to_string()],
             config_fields: vec![],
+            i18n: None,
         };
         let source_states = if enabled {
             enabled_source_states(&manifest.capabilities)
@@ -759,6 +963,8 @@ mod tests {
             plugin_dir: root.to_string_lossy().to_string(),
             icon_path: None,
             icon_data_url: None,
+            enabled,
+            sort_order: 0,
             source_states,
             installed_at: String::new(),
             updated_at: String::new(),

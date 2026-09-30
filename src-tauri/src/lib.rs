@@ -6,28 +6,33 @@ mod database;
 mod lyrics;
 mod lyrics_commands;
 mod models;
+mod path_access;
 mod paths;
 mod plugins;
 mod replay_gain;
+mod taglib_bridge;
 
 use batch::BatchManager;
 use commands::{
     analyze_replay_gain, cancel_batch_task, cancel_batch_task_item, cancel_replay_gain,
-    create_batch_task, fetch_remote_image, get_storage_info, install_source_plugin_archive,
-    invoke_source_plugin, load_artist_split_config, load_batch_task_items, load_batch_tasks,
+    create_batch_task, delete_batch_tasks, export_config, fetch_remote_image, get_storage_info,
+    import_config, install_source_plugin_archive, invoke_source_plugin, load_app_logs,
+    load_artist_split_config, load_batch_task_items, load_batch_tasks, load_custom_tags,
     load_desktop_settings, load_library_folders, load_library_track, load_library_tracks,
-    load_source_plugins, load_track_covers, preview_batch_rename, preview_source_plugin_archive,
-    read_audio_file, read_image_file, read_text_file, remove_library_folder,
-    reorder_plugin_sources, retry_failed_batch_items, save_artist_split_config, save_audio_tags,
-    save_desktop_settings, save_source_plugin_settings, scan_folder, set_plugin_source_enabled,
-    start_batch_task, uninstall_source_plugin, upsert_library_folder, write_image_file,
-    write_text_file,
+    load_library_tracks_by_paths, load_source_plugins, load_track_covers, preview_batch_rename,
+    preview_source_plugin_archive, read_audio_file, read_image_file, read_text_file,
+    remove_library_folder, reorder_plugin_sources, retry_failed_batch_items,
+    save_artist_split_config, save_audio_tags, save_custom_tags, save_desktop_settings,
+    save_source_plugin_settings, scan_folder, search_lyrics_lines, set_plugin_source_enabled,
+    set_source_plugin_enabled, set_source_plugin_order, start_batch_task,
+    uninstall_source_plugin, upsert_library_folder, write_image_file, write_text_file,
 };
 use database::Database;
 use lyrics_commands::{
     detect_lyrics_format, extract_plain_lyrics_text, process_lyrics_text, render_plugin_lyrics,
 };
 use paths::resolve_data_paths;
+use path_access::{pick_paths, pick_save_path, PathGrants};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -38,6 +43,7 @@ pub(crate) struct AppState {
     pub(crate) active_scans: Mutex<HashSet<String>>,
     pub(crate) active_replay_gain: Mutex<HashMap<String, Arc<AtomicBool>>>,
     pub(crate) batch_manager: BatchManager,
+    pub(crate) path_grants: PathGrants,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -45,6 +51,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_sharehub::init())
         .setup(|app| {
             let paths = resolve_data_paths(&app.handle()).map_err(std::io::Error::other)?;
             let database = tauri::async_runtime::block_on(Database::open(&paths.database))
@@ -59,6 +66,7 @@ pub fn run() {
                 active_scans: Mutex::new(HashSet::new()),
                 active_replay_gain: Mutex::new(HashMap::new()),
                 batch_manager: BatchManager::new(database),
+                path_grants: PathGrants::default(),
             });
             app.state::<AppState>()
                 .batch_manager
@@ -67,7 +75,11 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             scan_folder,
-            read_audio_file,
+            pick_paths,
+            pick_save_path,
+             read_audio_file,
+             load_custom_tags,
+             save_custom_tags,
             read_image_file,
             read_text_file,
             write_text_file,
@@ -75,6 +87,7 @@ pub fn run() {
             save_audio_tags,
             load_library_folders,
             load_library_tracks,
+            load_library_tracks_by_paths,
             load_library_track,
             load_track_covers,
             load_artist_split_config,
@@ -86,9 +99,10 @@ pub fn run() {
             get_storage_info,
             analyze_replay_gain,
             cancel_replay_gain,
-            create_batch_task,
-            load_batch_tasks,
-            load_batch_task_items,
+             create_batch_task,
+             load_batch_tasks,
+             delete_batch_tasks,
+             load_batch_task_items,
             preview_batch_rename,
             start_batch_task,
             cancel_batch_task,
@@ -99,10 +113,16 @@ pub fn run() {
             install_source_plugin_archive,
             set_plugin_source_enabled,
             reorder_plugin_sources,
+            set_source_plugin_enabled,
+            set_source_plugin_order,
             save_source_plugin_settings,
             uninstall_source_plugin,
             invoke_source_plugin,
             fetch_remote_image,
+            export_config,
+            import_config,
+            search_lyrics_lines,
+            load_app_logs,
             process_lyrics_text,
             render_plugin_lyrics,
             extract_plain_lyrics_text,

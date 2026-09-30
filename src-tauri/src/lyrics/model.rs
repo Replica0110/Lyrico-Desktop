@@ -141,7 +141,7 @@ pub(crate) enum ConversionMode {
     SimplifiedToTraditional,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum LineTrack {
     Original,

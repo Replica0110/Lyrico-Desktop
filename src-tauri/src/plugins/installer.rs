@@ -31,11 +31,12 @@ struct Candidate {
 pub(crate) async fn load_plugins(
     database: &Database,
     plugins_root: &Path,
+    locale: Option<&str>,
 ) -> Result<Vec<SourcePlugin>, String> {
     let records = database.load_plugin_records().await?;
     records
         .into_iter()
-        .map(|record| source_from_record(record, plugins_root))
+        .map(|record| source_from_record(record, plugins_root, locale))
         .collect()
 }
 
@@ -45,6 +46,7 @@ pub(crate) async fn install_archive(
     archive_path: &Path,
     allow_downgrade: bool,
     selected_roots: Option<Vec<String>>,
+    locale: Option<&str>,
 ) -> Result<PluginInstallResult, String> {
     validate_archive_path(archive_path)?;
     fs::create_dir_all(plugins_root).map_err(|error| error.to_string())?;
@@ -89,7 +91,9 @@ pub(crate) async fn install_archive(
                     continue;
                 }
             }
-            match install_candidate(database, plugins_root, &candidate, &candidate_roots).await {
+            match install_candidate(database, plugins_root, &candidate, &candidate_roots, locale)
+                .await
+            {
                 Ok(plugin) => installed.push(plugin),
                 Err(reason) => failed.push(failure(&candidate, &reason)),
             }
@@ -176,18 +180,34 @@ fn validate_archive_path(archive_path: &Path) -> Result<(), String> {
     }
 }
 
+pub(crate) async fn set_enabled(
+    database: &Database,
+    plugins_root: &Path,
+    plugin_id: &str,
+    enabled: bool,
+    locale: Option<&str>,
+) -> Result<Vec<SourcePlugin>, String> {
+    validate_plugin_id(plugin_id)?;
+    if enabled && !plugins_root.join(plugin_id).is_dir() {
+        return Err("Installed plugin directory is missing".to_string());
+    }
+    database.set_plugin_enabled(plugin_id, enabled).await?;
+    load_plugins(database, plugins_root, locale).await
+}
+
 pub(crate) async fn set_source_enabled(
     database: &Database,
     plugins_root: &Path,
     plugin_id: &str,
     source_kind: &str,
     enabled: bool,
+    locale: Option<&str>,
 ) -> Result<Vec<SourcePlugin>, String> {
     validate_plugin_id(plugin_id)?;
     database
         .set_plugin_source_enabled(plugin_id, source_kind, enabled)
         .await?;
-    load_plugins(database, plugins_root).await
+    load_plugins(database, plugins_root, locale).await
 }
 
 pub(crate) async fn reorder_sources(
@@ -195,11 +215,12 @@ pub(crate) async fn reorder_sources(
     plugins_root: &Path,
     source_kind: &str,
     plugin_ids: Vec<String>,
+    locale: Option<&str>,
 ) -> Result<Vec<SourcePlugin>, String> {
     database
         .reorder_plugin_sources(source_kind, &plugin_ids)
         .await?;
-    load_plugins(database, plugins_root).await
+    load_plugins(database, plugins_root, locale).await
 }
 
 pub(crate) async fn save_settings(
@@ -207,6 +228,7 @@ pub(crate) async fn save_settings(
     plugins_root: &Path,
     plugin_id: &str,
     config: Value,
+    locale: Option<&str>,
 ) -> Result<Vec<SourcePlugin>, String> {
     validate_plugin_id(plugin_id)?;
     if !config.is_object() {
@@ -215,13 +237,14 @@ pub(crate) async fn save_settings(
     database
         .save_plugin_settings(plugin_id, &config.to_string())
         .await?;
-    load_plugins(database, plugins_root).await
+    load_plugins(database, plugins_root, locale).await
 }
 
 pub(crate) async fn uninstall(
     database: &Database,
     plugins_root: &Path,
     plugin_id: &str,
+    locale: Option<&str>,
 ) -> Result<Vec<SourcePlugin>, String> {
     validate_plugin_id(plugin_id)?;
     let target = plugins_root.join(plugin_id);
@@ -229,7 +252,7 @@ pub(crate) async fn uninstall(
         fs::remove_dir_all(&target).map_err(|error| error.to_string())?;
     }
     database.delete_plugin_record(plugin_id).await?;
-    load_plugins(database, plugins_root).await
+    load_plugins(database, plugins_root, locale).await
 }
 
 async fn install_candidate(
@@ -237,6 +260,7 @@ async fn install_candidate(
     plugins_root: &Path,
     candidate: &Candidate,
     candidate_roots: &[PathBuf],
+    locale: Option<&str>,
 ) -> Result<SourcePlugin, String> {
     let suffix = unique_suffix();
     let staging = plugins_root.join(format!(".staging-{}-{suffix}", candidate.manifest.id));
@@ -277,7 +301,7 @@ async fn install_candidate(
         }
     };
     let _ = fs::remove_dir_all(&backup);
-    source_from_record(record, plugins_root)
+    source_from_record(record, plugins_root, locale)
 }
 
 fn extract_archive(archive_path: &Path, target: &Path) -> Result<(), String> {
@@ -394,6 +418,7 @@ fn build_candidate(
         }
         validate_file(&root, icon, None, MAX_PLUGIN_BYTES, "icon")?;
     }
+    super::i18n::validate(&root, &manifest)?;
     Ok(Candidate {
         manifest,
         manifest_json,
@@ -410,17 +435,29 @@ fn validate_manifest(manifest: &PluginManifest) -> Result<(), String> {
     if manifest.version_code < 1 {
         return Err("Plugin versionCode must be >= 1".to_string());
     }
-    if !(MIN_PLUGIN_API_VERSION..=PLUGIN_API_VERSION).contains(&manifest.api_version) {
+    if manifest.api_version < MIN_PLUGIN_API_VERSION || manifest.api_version > PLUGIN_API_VERSION {
         return Err(format!(
-            "Unsupported plugin apiVersion: {} (supported: {}..{})",
+            "Unsupported plugin apiVersion: {} (supported: {}..={})",
             manifest.api_version, MIN_PLUGIN_API_VERSION, PLUGIN_API_VERSION
         ));
     }
-    if !(MIN_HOST_API_VERSION..=HOST_API_VERSION).contains(&manifest.min_host_api_version) {
+    if manifest.min_host_api_version < MIN_HOST_API_VERSION
+        || manifest.min_host_api_version > HOST_API_VERSION
+    {
         return Err(format!(
-            "Unsupported minHostApiVersion: {} (supported: {}..{})",
+            "Unsupported minHostApiVersion: {} (host: {}..={})",
             manifest.min_host_api_version, MIN_HOST_API_VERSION, HOST_API_VERSION
         ));
+    }
+    if !manifest.capabilities.is_empty()
+        && !manifest.capabilities.iter().any(|value| {
+            matches!(
+                value.as_str(),
+                "searchSongs" | "getLyrics" | "searchCovers"
+            )
+        })
+    {
+        return Err("A source plugin must support searchSongs".to_string());
     }
     for capability in &manifest.capabilities {
         if !["searchSongs", "getLyrics", "searchCovers"].contains(&capability.as_str()) {
@@ -611,12 +648,27 @@ fn default_settings(manifest: &PluginManifest) -> Map<String, Value> {
         .collect()
 }
 
-fn source_from_record(record: PluginRecord, plugins_root: &Path) -> Result<SourcePlugin, String> {
-    let manifest: PluginManifest = serde_json::from_str(&record.manifest_json)
+fn source_from_record(
+    record: PluginRecord,
+    plugins_root: &Path,
+    locale: Option<&str>,
+) -> Result<SourcePlugin, String> {
+    let mut manifest: PluginManifest = serde_json::from_str(&record.manifest_json)
         .map_err(|error| format!("Stored plugin manifest is invalid: {error}"))?;
     let config = serde_json::from_str(&record.settings_json)
         .map_err(|error| format!("Stored plugin settings are invalid: {error}"))?;
     let plugin_dir = plugins_root.join(&manifest.id);
+    if manifest.capabilities.is_empty() {
+        manifest.capabilities = vec!["searchSongs".to_string()];
+    }
+    if let Some(locale) = locale {
+        let preferred = [locale.to_string()];
+        if let Ok(localized) =
+            super::i18n::localize_manifest(&manifest, &plugin_dir, &preferred)
+        {
+            manifest = localized;
+        }
+    }
     let icon_path = manifest
         .icon
         .as_ref()
@@ -631,6 +683,9 @@ fn source_from_record(record: PluginRecord, plugins_root: &Path) -> Result<Sourc
         manifest.capabilities.iter().map(String::as_str).collect()
     };
     let supports = |capability: &str| capabilities.contains(&capability);
+    let has_explicit_source_flags =
+        record.metadata_enabled || record.lyrics_enabled || record.cover_enabled;
+    let source_enabled = |flag: bool| flag || (record.enabled && !has_explicit_source_flags);
     let mut source_states = BTreeMap::new();
     if ["searchSongs", "getLyrics", "searchCovers"]
         .iter()
@@ -648,7 +703,7 @@ fn source_from_record(record: PluginRecord, plugins_root: &Path) -> Result<Sourc
         source_states.insert(
             "metadata".to_string(),
             PluginSourceState {
-                enabled: record.metadata_enabled,
+                enabled: source_enabled(record.metadata_enabled),
                 priority: record.metadata_sort_order,
             },
         );
@@ -657,7 +712,7 @@ fn source_from_record(record: PluginRecord, plugins_root: &Path) -> Result<Sourc
         source_states.insert(
             "lyrics".to_string(),
             PluginSourceState {
-                enabled: record.lyrics_enabled,
+                enabled: source_enabled(record.lyrics_enabled),
                 priority: record.lyrics_sort_order,
             },
         );
@@ -666,7 +721,7 @@ fn source_from_record(record: PluginRecord, plugins_root: &Path) -> Result<Sourc
         source_states.insert(
             "covers".to_string(),
             PluginSourceState {
-                enabled: record.cover_enabled,
+                enabled: source_enabled(record.cover_enabled),
                 priority: record.cover_sort_order,
             },
         );
@@ -676,6 +731,8 @@ fn source_from_record(record: PluginRecord, plugins_root: &Path) -> Result<Sourc
         plugin_dir: plugin_dir.to_string_lossy().to_string(),
         icon_path,
         icon_data_url,
+        enabled: record.enabled,
+        sort_order: record.sort_order,
         source_states,
         installed_at: record.installed_at,
         updated_at: record.updated_at,
@@ -757,12 +814,14 @@ mod tests {
             icon: None,
             capabilities: capabilities.into_iter().map(str::to_string).collect(),
             config_fields: vec![],
+            i18n: None,
         };
 
         assert!(validate_manifest(&manifest(1, vec![])).is_ok());
         assert!(validate_manifest(&manifest(4, vec!["getLyrics"])).is_ok());
         assert!(validate_manifest(&manifest(4, vec!["searchCovers"])).is_ok());
-        assert!(validate_manifest(&manifest(5, vec!["searchSongs"])).is_err());
+        assert!(validate_manifest(&manifest(5, vec!["searchSongs"])).is_ok());
+        assert!(validate_manifest(&manifest(6, vec!["searchSongs"])).is_err());
         assert!(validate_manifest(&manifest(0, vec!["searchSongs"])).is_err());
     }
 
@@ -782,6 +841,7 @@ mod tests {
             icon: None,
             capabilities: vec!["getLyrics".to_string()],
             config_fields: vec![],
+            i18n: None,
         };
         let source = source_from_record(
             PluginRecord {
@@ -800,6 +860,7 @@ mod tests {
                 settings_json: "{}".to_string(),
             },
             Path::new("C:/plugins"),
+            None,
         )
         .unwrap();
 
@@ -808,5 +869,57 @@ mod tests {
         assert!(source.source_state("metadata").is_none());
         assert!(source.source_state("covers").is_none());
         assert!(source.source_state("aggregated").is_none());
+    }
+
+    #[test]
+    fn legacy_master_switch_drives_source_states_until_a_category_is_configured() {
+        let manifest = PluginManifest {
+            id: "com.example.legacy".to_string(),
+            name: "Legacy".to_string(),
+            version_code: 1,
+            version_name: "1.0.0".to_string(),
+            author: String::new(),
+            description: String::new(),
+            api_version: 4,
+            min_host_api_version: 1,
+            entry: "source.js".to_string(),
+            include_dirs: vec![],
+            icon: None,
+            capabilities: vec!["searchSongs".to_string(), "getLyrics".to_string()],
+            config_fields: vec![],
+            i18n: None,
+        };
+        let record = |enabled: bool, metadata_enabled: bool, lyrics_enabled: bool| PluginRecord {
+            id: manifest.id.clone(),
+            manifest_json: serde_json::to_string(&manifest).unwrap(),
+            enabled,
+            metadata_enabled,
+            lyrics_enabled,
+            cover_enabled: false,
+            sort_order: 3,
+            metadata_sort_order: 0,
+            lyrics_sort_order: 0,
+            cover_sort_order: 0,
+            installed_at: String::new(),
+            updated_at: String::new(),
+            settings_json: "{}".to_string(),
+        };
+
+        let enabled =
+            source_from_record(record(true, false, false), Path::new("C:/plugins"), None).unwrap();
+        assert!(enabled.enabled);
+        assert_eq!(enabled.sort_order, 3);
+        assert!(enabled.source_state("metadata").unwrap().enabled);
+
+        let disabled =
+            source_from_record(record(false, false, false), Path::new("C:/plugins"), None).unwrap();
+        assert!(!disabled.enabled);
+        assert!(!disabled.source_state("metadata").unwrap().enabled);
+        assert!(!disabled.is_enabled_anywhere());
+
+        let configured =
+            source_from_record(record(true, true, false), Path::new("C:/plugins"), None).unwrap();
+        assert!(configured.source_state("metadata").unwrap().enabled);
+        assert!(!configured.source_state("lyrics").unwrap().enabled);
     }
 }

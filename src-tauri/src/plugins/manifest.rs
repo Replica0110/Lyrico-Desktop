@@ -3,9 +3,9 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 pub(crate) const MIN_PLUGIN_API_VERSION: u32 = 1;
-pub(crate) const PLUGIN_API_VERSION: u32 = 4;
+pub(crate) const PLUGIN_API_VERSION: u32 = 5;
 pub(crate) const MIN_HOST_API_VERSION: u32 = 1;
-pub(crate) const HOST_API_VERSION: u32 = 3;
+pub(crate) const HOST_API_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,6 +31,16 @@ pub(crate) struct PluginManifest {
     pub(crate) capabilities: Vec<String>,
     #[serde(default)]
     pub(crate) config_fields: Vec<PluginConfigField>,
+    #[serde(default)]
+    pub(crate) i18n: Option<PluginI18n>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PluginI18n {
+    pub(crate) default_locale: String,
+    #[serde(default)]
+    pub(crate) resources: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +81,8 @@ pub(crate) struct SourcePlugin {
     pub(crate) plugin_dir: String,
     pub(crate) icon_path: Option<String>,
     pub(crate) icon_data_url: Option<String>,
+    pub(crate) enabled: bool,
+    pub(crate) sort_order: i32,
     pub(crate) source_states: BTreeMap<String, PluginSourceState>,
     pub(crate) installed_at: String,
     pub(crate) updated_at: String,
@@ -187,5 +199,34 @@ mod tests {
         }));
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn serializes_the_legacy_switch_state_for_the_frontend() {
+        let manifest: PluginManifest = serde_json::from_value(serde_json::json!({
+            "id": "com.example.state",
+            "name": "State",
+            "versionCode": 1,
+            "versionName": "1.0.0",
+            "apiVersion": 3
+        }))
+        .unwrap();
+        let plugin = SourcePlugin {
+            manifest,
+            plugin_dir: "C:/plugins/com.example.state".to_string(),
+            icon_path: None,
+            icon_data_url: None,
+            enabled: true,
+            sort_order: 3,
+            source_states: BTreeMap::new(),
+            installed_at: String::new(),
+            updated_at: String::new(),
+            config: Value::Object(Default::default()),
+        };
+
+        let value = serde_json::to_value(&plugin).unwrap();
+
+        assert_eq!(value.get("enabled"), Some(&Value::Bool(true)));
+        assert_eq!(value.get("sortOrder"), Some(&Value::from(3)));
     }
 }
