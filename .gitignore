@@ -22,3 +22,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Native dependency downloads and local build output
+src-tauri/native/taglib-build/
+src-tauri/native/taglib/_deps/
+src-tauri/native/taglib-build-*/
+
+# Local agent state
+.opencode/
+test-lofty/target/

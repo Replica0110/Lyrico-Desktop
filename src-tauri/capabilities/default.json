@@ -12,6 +12,7 @@
     "core:window:allow-is-maximized",
     "core:window:allow-start-dragging",
     "dialog:default",
-    "opener:default"
+    "opener:default",
+    "sharehub:default"
   ]
 }
