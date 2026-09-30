@@ -1,14 +1,17 @@
 import { ArrowLeftOutlined, CheckOutlined, CheckSquareOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
 import { Button, Flex, Input, Space, Typography } from "antd";
-import { memo, useMemo } from "react";
+import { memo, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import type { AudioTrack } from "../app/types";
 import { LibraryTable } from "../components/LibraryTable";
 import { LibrarySelectionToolbar } from "../components/LibrarySelectionToolbar";
+import { SortSelect } from "../components/SortSelect";
 import { TrackArtwork } from "../components/TrackArtwork";
 import type { AlbumGroup } from "../domain/library";
+import { albumSortFields, sortAlbumsBy, type AlbumSortField, type SortState } from "../domain/sort";
 import { formatDuration } from "../utils/format";
 import { useIncrementalGrid } from "../hooks/useIncrementalGrid";
+import { useStickyOffset } from "../hooks/useStickyOffset";
 
 const { Title, Text } = Typography;
 
@@ -16,7 +19,6 @@ export const AlbumsPage = memo(function AlbumsPage({
   albums,
   query,
   selectedAlbumId,
-  selectedPath,
   detailsOpen,
   loading,
   onChangeQuery,
@@ -34,7 +36,6 @@ export const AlbumsPage = memo(function AlbumsPage({
   albums: AlbumGroup[];
   query: string;
   selectedAlbumId?: string;
-  selectedPath?: string;
   detailsOpen: boolean;
   loading: boolean;
   onChangeQuery: (query: string) => void;
@@ -50,10 +51,14 @@ export const AlbumsPage = memo(function AlbumsPage({
   onOpenBatch: () => void;
 }) {
   const { t } = useTranslation();
+  const [sort, setSort] = useState<SortState<AlbumSortField>>();
+  const sortedAlbums = useMemo(() => (sort ? sortAlbumsBy(albums, sort.key, sort.direction) : albums), [albums, sort]);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const stickyOffset = useStickyOffset(headerRef);
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumId);
-  const { visibleCount, sentinelRef, hasMore } = useIncrementalGrid(albums.length);
+  const { visibleCount, sentinelRef, hasMore } = useIncrementalGrid(sortedAlbums.length);
   const selectedSet = useMemo(() => new Set(selectedPaths), [selectedPaths]);
-  const fullySelectedAlbumIds = useMemo(() => albums.filter((album) => album.tracks.length > 0 && album.tracks.every((track) => selectedSet.has(track.path))).map((album) => album.id), [albums, selectedSet]);
+  const fullySelectedAlbumIds = useMemo(() => sortedAlbums.filter((album) => album.tracks.length > 0 && album.tracks.every((track) => selectedSet.has(track.path))).map((album) => album.id), [sortedAlbums, selectedSet]);
   const changeAlbumSelection = (album: AlbumGroup, selected: boolean) => {
     const albumPaths = new Set(album.tracks.map((track) => track.path));
     onChangeSelectedPaths(selected
@@ -76,7 +81,6 @@ export const AlbumsPage = memo(function AlbumsPage({
       </section>
       <LibraryTable
         tracks={selectedAlbum.tracks as AudioTrack[]}
-        selectedPath={selectedPath}
         onSelectTrack={onSelectTrack}
         onOpenTrack={(track) => onOpenTrack(track.path)}
         selectedPaths={selectedPaths}
@@ -89,23 +93,28 @@ export const AlbumsPage = memo(function AlbumsPage({
   }
 
   return (
-    <div className="workspace page-stack library-view">
-      <Flex className="library-page-header compact-library-header" justify="space-between" align="center" gap={24}>
+    <div className="workspace page-stack library-view" style={{ "--sticky-offset": `${stickyOffset}px` } as CSSProperties}>
+      <Flex ref={headerRef} className="library-page-header compact-library-header" justify="space-between" align="center" gap={24}>
         <div className="library-page-header-copy">
           <Title level={2}>{t("albums.title")}</Title>
           <Text type="secondary">{t("common.albumCount", { count: albums.length })}</Text>
         </div>
-        <Space className="library-page-actions">
+        <Space className="library-page-actions" wrap>
           <Input allowClear className="page-search" prefix={<SearchOutlined />} placeholder={t("search.placeholder", { scope: t("search.albums") })} value={query} onChange={(event) => onChangeQuery(event.target.value)} />
+          <SortSelect
+            value={sort}
+            onChange={setSort}
+            fields={albumSortFields.map((key) => ({ key, label: t(`sort.field.${key}`) }))}
+          />
           {selectionMode ? <Button icon={<CloseOutlined />} onClick={() => onChangeSelectionMode(false)}>{t("selection.exit")}</Button> : <Button icon={<CheckSquareOutlined />} onClick={() => onChangeSelectionMode(true)}>{t("selection.selectAlbums")}</Button>}
         </Space>
       </Flex>
       <section className="collection-grid-section">
         {selectionMode ? <LibrarySelectionToolbar selectedCount={selectedPaths.length} onOpenBatch={onOpenBatch} /> : null}
         <div className="album-grid" aria-busy={loading}>
-          {albums.slice(0, visibleCount).map((album) => {
+          {sortedAlbums.slice(0, visibleCount).map((album) => {
             const selected = fullySelectedAlbumIds.includes(album.id);
-            return <button className={`collection-tile album-tile${album.id === selectedAlbumId ? " is-current" : ""}`} key={album.id} aria-pressed={selectionMode ? selected : undefined} onClick={() => {
+            return <button className="collection-tile album-tile" key={album.id} aria-pressed={selectionMode ? selected : undefined} onClick={() => {
               if (selectionMode) changeAlbumSelection(album, !selected);
               else { onSelectAlbum(album.id); onOpenDetails(); }
             }}>

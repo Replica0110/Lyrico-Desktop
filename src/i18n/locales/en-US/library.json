@@ -20,6 +20,8 @@
     "selectedSongs": "Selected songs",
     "drawerTitle": "Selected songs ({{count}})",
     "clear": "Clear selection",
+    "selectAll": "Select all",
+    "hint": "Click to toggle, Ctrl to add, Shift for a range, double-click to edit",
     "empty": "No songs selected"
   },
   "songs": {
@@ -38,7 +40,30 @@
     "track": "Track",
     "duration": "Duration",
     "format": "Format",
+    "modifiedAt": "Modified",
+    "createdAt": "Date created",
     "range": "{{start}}–{{end}} of {{total}}"
+  },
+  "sort": {
+    "label": "Sort",
+    "fieldLabel": "Sort by",
+    "directionLabel": "Order",
+    "asc": "Ascending",
+    "desc": "Descending",
+    "toggle": "Sort by {{field}}",
+    "field": {
+      "title": "Title",
+      "artist": "Artist",
+      "album": "Album",
+      "name": "Name",
+      "trackCount": "Tracks",
+      "albumCount": "Albums",
+      "format": "Format",
+      "duration": "Duration",
+      "modifiedAt": "Modified",
+      "createdAt": "Date created",
+      "lastScan": "Last scan"
+    }
   },
   "albums": {
     "title": "Albums",
@@ -67,6 +92,8 @@
     "rescanRoot": "Rescan root",
     "remove": "Remove from library",
     "removeRoot": "Remove root",
+    "hide": "Hide from library",
+    "show": "Show in library",
     "empty": "Add one or more music folders to build your library.",
     "tracksTitle": "Folder songs",
     "includeSubfolders": "Include subfolders",

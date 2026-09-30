@@ -1,10 +1,13 @@
-import { DeleteOutlined, FolderAddOutlined, ReloadOutlined } from "@ant-design/icons";
+import { DeleteOutlined, EyeInvisibleOutlined, EyeOutlined, FolderAddOutlined, ReloadOutlined } from "@ant-design/icons";
 import { Alert, Badge, Breadcrumb, Button, Empty, Flex, Input, Segmented, Space, Tooltip, Tree, Typography } from "antd";
 import { memo, useEffect, useMemo, useState, type Key, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { AudioTrack, LibraryFolder } from "../app/types";
 import { LibraryTable } from "../components/LibraryTable";
+import { SortSelect } from "../components/SortSelect";
 import { buildLibraryFolderTree, filterTracks, tracksInDirectory, type LibraryFolderNode } from "../domain/library";
+import { folderSortFields, sortFoldersBy, type FolderSortField, type SortState } from "../domain/sort";
+import { formatTimeValue } from "../utils/format";
 
 const { DirectoryTree } = Tree;
 const { Title, Text } = Typography;
@@ -13,11 +16,12 @@ export const FoldersPage = memo(function FoldersPage({
   folders,
   tracks,
   selectedFolderPath,
-  selectedTrackPath,
   loading,
   onAddFolders,
   onRescanFolder,
   onRemoveFolder,
+  hiddenFolderPaths,
+  onToggleFolderHidden,
   onSelectFolder,
   onSelectTrack,
   onOpenTrack,
@@ -30,11 +34,12 @@ export const FoldersPage = memo(function FoldersPage({
   folders: LibraryFolder[];
   tracks: AudioTrack[];
   selectedFolderPath?: string;
-  selectedTrackPath?: string;
   loading: boolean;
   onAddFolders: () => void;
   onRescanFolder: (path: string) => void;
   onRemoveFolder: (path: string) => void;
+  hiddenFolderPaths: string[];
+  onToggleFolderHidden: (path: string) => void;
   onSelectFolder: (path?: string) => void;
   onSelectTrack: (path?: string) => void;
   onOpenTrack: (path: string) => void;
@@ -45,7 +50,9 @@ export const FoldersPage = memo(function FoldersPage({
   onOpenBatch: () => void;
 }) {
   const { t } = useTranslation();
-  const folderTree = useMemo(() => buildLibraryFolderTree(folders, tracks), [folders, tracks]);
+  const [folderSort, setFolderSort] = useState<SortState<FolderSortField>>();
+  const sortedFolders = useMemo(() => (folderSort ? sortFoldersBy(folders, folderSort.key, folderSort.direction) : folders), [folders, folderSort]);
+  const folderTree = useMemo(() => buildLibraryFolderTree(sortedFolders, tracks), [sortedFolders, tracks]);
   const nodeMap = useMemo(() => mapFolderNodes(folderTree), [folderTree]);
   const selectedRoot = folderTree.find((node) => samePath(node.rootPath, selectedFolderPath)) ?? folderTree[0];
   const [selectedDirectoryKey, setSelectedDirectoryKey] = useState<string>();
@@ -75,6 +82,7 @@ export const FoldersPage = memo(function FoldersPage({
   const folderTracks = useMemo(() => activeNode ? tracksInDirectory(tracks, activeNode.path, scope === "recursive") : [], [activeNode, tracks, scope]);
   const visibleTracks = useMemo(() => filterTracks(folderTracks, query), [folderTracks, query]);
   const breadcrumbs = useMemo(() => activeNode ? folderAncestors(nodeMap, activeNode) : [], [activeNode, nodeMap]);
+  const lastScanText = activeRoot ? formatTimeValue(activeRoot.lastScannedAt) : "-";
   const treeData = useMemo(() => folderTree.map((node) => toTreeData(node, folders)), [folderTree, folders]);
 
   function selectDirectory(node: LibraryFolderNode) {
@@ -124,16 +132,23 @@ export const FoldersPage = memo(function FoldersPage({
             {activeNode && activeRoot ? (
               <>
                 <Flex className="folder-pane-header" align="center" justify="space-between" gap={12}>
-                  <Tooltip title={displayFolderPath(activeNode.path, activeRoot.path)}>
-                    <Breadcrumb
-                      className="folder-detail-breadcrumb"
-                      items={breadcrumbs.map((node, index) => ({
-                        title: index === breadcrumbs.length - 1 ? node.name : (
-                          <Button type="link" size="small" className="folder-breadcrumb-button" onClick={() => selectDirectory(node)}>{node.name}</Button>
-                        ),
-                      }))}
-                    />
-                  </Tooltip>
+                  <Space>
+                    <Tooltip title={displayFolderPath(activeNode.path, activeRoot.path)}>
+                      <Breadcrumb
+                        className="folder-detail-breadcrumb"
+                        items={breadcrumbs.map((node, index) => ({
+                          title: index === breadcrumbs.length - 1 ? node.name : (
+                            <Button type="link" size="small" className="folder-breadcrumb-button" onClick={() => selectDirectory(node)}>{node.name}</Button>
+                          ),
+                        }))}
+                      />
+                    </Tooltip>
+                    {activeRoot && lastScanText !== "-" ? (
+                      <Tooltip title={activeRoot.lastScannedAt}>
+                        <Text className="folder-last-scan" type="secondary">{t("folders.lastScanValue", { value: lastScanText })}</Text>
+                      </Tooltip>
+                    ) : null}
+                  </Space>
                   <Space>
                     <Tooltip title={t("folders.rescan")}>
                       <Button
@@ -145,6 +160,16 @@ export const FoldersPage = memo(function FoldersPage({
                         onClick={() => onRescanFolder(activeRoot.path)}
                       />
                     </Tooltip>
+                    {activeNode.parentKey == null ? (
+                      <Tooltip title={hiddenFolderPaths.some((path) => samePath(path, activeRoot.path)) ? t("folders.show") : t("folders.hide")}>
+                        <Button
+                          type="text"
+                          icon={hiddenFolderPaths.some((path) => samePath(path, activeRoot.path)) ? <EyeOutlined /> : <EyeInvisibleOutlined />}
+                          aria-label={hiddenFolderPaths.some((path) => samePath(path, activeRoot.path)) ? t("folders.show") : t("folders.hide")}
+                          onClick={() => onToggleFolderHidden(activeRoot.path)}
+                        />
+                      </Tooltip>
+                    ) : null}
                     {activeNode.parentKey == null ? (
                       <Tooltip title={t("folders.remove")}>
                         <Button type="text" danger icon={<DeleteOutlined />} aria-label={t("folders.remove")} onClick={() => onRemoveFolder(activeRoot.path)} />
@@ -170,12 +195,16 @@ export const FoldersPage = memo(function FoldersPage({
                     placeholder={t("folders.searchPlaceholder")}
                     onChange={(event) => setQuery(event.target.value)}
                   />
+                  <SortSelect
+                    value={folderSort}
+                    onChange={setFolderSort}
+                    fields={folderSortFields.map((key) => ({ key, label: t(`sort.field.${key}`) }))}
+                  />
                 </Flex>
 
                 <LibraryTable
                   tracks={visibleTracks}
                   loading={loading}
-                  selectedPath={selectedTrackPath}
                   onSelectTrack={onSelectTrack}
                   onOpenTrack={(track) => onOpenTrack(track.path)}
                   selectedPaths={selectedPaths}

@@ -19,6 +19,8 @@
     "selectedSongs": "已选歌曲",
     "drawerTitle": "已选歌曲（{{count}}）",
     "clear": "清空选择",
+    "selectAll": "全选",
+    "hint": "单击切换选择，Ctrl 加选，Shift 连选，双击编辑",
     "empty": "没有选择歌曲"
   },
   "songs": {
@@ -37,7 +39,30 @@
     "track": "曲序",
     "duration": "时长",
     "format": "格式",
+    "modifiedAt": "修改时间",
+    "createdAt": "创建时间",
     "range": "第 {{start}}–{{end}} 项，共 {{total}} 项"
+  },
+  "sort": {
+    "label": "排序",
+    "fieldLabel": "排序字段",
+    "directionLabel": "升降序",
+    "asc": "升序",
+    "desc": "降序",
+    "toggle": "按{{field}}排序",
+    "field": {
+      "title": "歌曲",
+      "artist": "艺术家",
+      "album": "专辑",
+      "name": "名称",
+      "trackCount": "歌曲数",
+      "albumCount": "专辑数",
+      "format": "格式",
+      "duration": "时长",
+      "modifiedAt": "修改时间",
+      "createdAt": "创建时间",
+      "lastScan": "上次扫描"
+    }
   },
   "albums": {
     "title": "专辑",
@@ -66,7 +91,9 @@
     "rescanRoot": "扫描根目录",
     "remove": "从音乐库移除",
     "removeRoot": "移除根目录",
-    "empty": "还没有音乐文件夹",
+    "hide": "在音乐库中隐藏",
+    "show": "在音乐库中显示",
+    "empty": "添加一个或多个音乐文件夹以建立音乐库。",
     "tracksTitle": "文件夹歌曲",
     "includeSubfolders": "包含子文件夹",
     "currentFolderOnly": "仅当前文件夹",
