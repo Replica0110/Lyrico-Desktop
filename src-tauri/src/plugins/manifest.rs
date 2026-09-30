@@ -102,7 +102,7 @@ impl SourcePlugin {
     }
 
     pub(crate) fn is_enabled_anywhere(&self) -> bool {
-        self.source_states.values().any(|state| state.enabled)
+        self.enabled && self.source_states.values().any(|state| state.enabled)
     }
 }
 

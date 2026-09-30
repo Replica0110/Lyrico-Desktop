@@ -11,6 +11,8 @@ import { formatDuration } from "../utils/format";
 import { useImageDimensions } from "../hooks/useImageDimensions";
 import { CoverCropModal } from "./CoverCropModal";
 import { TrackArtwork } from "./TrackArtwork";
+import { RemoteArtwork } from "./RemoteArtwork";
+import { useRemoteImage } from "../hooks/useRemoteImage";
 import { useReplayGainProgress } from "../hooks/useReplayGainProgress";
 import { defaultOnlineSearchKeyword } from "../domain/search";
 import { normalizeEditFieldOrder } from "../domain/editFieldSettings";
@@ -191,7 +193,8 @@ function OnlineMatch({ track, plugins, settings, form, onApplied }: { track: Aud
   const [coverReviewUrl, setCoverReviewUrl] = useState<string>();
   const [coverSize, setCoverSize] = useState<number>();
   const [coverConfirming, setCoverConfirming] = useState(false);
-  const coverReviewDimensions = useImageDimensions(coverReviewUrl);
+  const coverPreview = useRemoteImage(coverReviewUrl);
+  const coverReviewDimensions = useImageDimensions(coverPreview.dataUrl);
   const [lyricsReview, setLyricsReview] = useState<string>();
   const [lyricsPayload, setLyricsPayload] = useState<unknown>();
   const [lyricsFormat, setLyricsFormat] = useState<LyricFormat>("verbatimLrc");
@@ -522,7 +525,7 @@ function OnlineMatch({ track, plugins, settings, form, onApplied }: { track: Aud
                 <Button key="lyrics" type="link" onClick={() => openLyricsEntry(entry)}>{t("details.fetchLyrics")}</Button>,
               ]}>
                 <List.Item.Meta
-                  avatar={<Avatar shape="square" size={48} src={resultCoverUrl(song)} />}
+                  avatar={<RemoteArtwork size={48} url={resultCoverUrl(song)} />}
                   title={title}
                   description={<Space size={6} wrap>
                     <Text type="secondary">{Array.isArray(artist) ? artist.join("/") : artist}</Text>
@@ -543,7 +546,7 @@ function OnlineMatch({ track, plugins, settings, form, onApplied }: { track: Aud
                 url ? <Button key="cover" type="link" onClick={() => { setError(undefined); setCoverReviewUrl(url); setCoverSize(undefined); }}>{t("details.useOnlineCover")}</Button> : null,
               ].filter(Boolean)}>
                 <List.Item.Meta
-                  avatar={<Avatar shape="square" size={48} src={url} />}
+                  avatar={<RemoteArtwork size={48} url={url} />}
                   title={title}
                   description={<Space size={6} wrap>
                     <Text type="secondary">{Array.isArray(artist) ? artist.join("/") : artist}</Text>
@@ -565,7 +568,7 @@ function OnlineMatch({ track, plugins, settings, form, onApplied }: { track: Aud
               cover ? <Button key="cover" type="link" onClick={() => openCoverReview(entry)}>{t("details.reviewCover")}</Button> : null,
               canFetchLyrics ? <Button key="lyrics" type="link" loading={busyResult === `lyrics:${entry.pluginId}:${resultId(result)}`} onClick={() => void openLyricsReview(entry)}>{t("details.reviewLyrics")}</Button> : null,
             ].filter(Boolean)}>
-              <List.Item.Meta avatar={<Avatar shape="square" size={48} src={cover} />} title={title} description={<Space size={6} wrap><Text type="secondary">{`${Array.isArray(artist) ? artist.join("/") : artist}${result.album || result.albumName ? ` · ${result.album ?? result.albumName}` : ""}`}</Text>{resultTab === "all" ? <Text type="secondary">· {plugin?.name}</Text> : null}</Space>} />
+              <List.Item.Meta avatar={<RemoteArtwork size={48} url={cover} />} title={title} description={<Space size={6} wrap><Text type="secondary">{`${Array.isArray(artist) ? artist.join("/") : artist}${result.album || result.albumName ? ` · ${result.album ?? result.albumName}` : ""}`}</Text>{resultTab === "all" ? <Text type="secondary">· {plugin?.name}</Text> : null}</Space>} />
             </List.Item>
           );
         }}
@@ -637,9 +640,10 @@ function OnlineMatch({ track, plugins, settings, form, onApplied }: { track: Aud
       >
         <Space orientation="vertical" size={16} className="full-width">
           {error ? <Alert type="error" showIcon message={error} /> : null}
+          {coverPreview.error ? <Alert type="error" showIcon message={coverPreview.error} /> : null}
           <div className="online-cover-preview">
             <span className="artwork-frame">
-              <Avatar shape="square" size={220} src={coverReviewUrl} />
+              <Avatar shape="square" size={220} src={coverPreview.dataUrl} />
               {coverReviewDimensions ? <span className="cover-dimensions">{coverReviewDimensions.width} × {coverReviewDimensions.height}</span> : null}
             </span>
           </div>

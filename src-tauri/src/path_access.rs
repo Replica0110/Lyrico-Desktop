@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::Deserialize;
-use tauri_plugin_dialog::DialogExt as _;
 use tauri::{AppHandle, Manager, State, Window};
+use tauri_plugin_dialog::DialogExt as _;
 
 use crate::config as app_config;
 use crate::AppState;
@@ -33,7 +33,10 @@ impl PathGrants {
     }
 
     fn snapshot(&self) -> HashSet<PathBuf> {
-        self.0.lock().map(|grants| grants.clone()).unwrap_or_default()
+        self.0
+            .lock()
+            .map(|grants| grants.clone())
+            .unwrap_or_default()
     }
 }
 
@@ -45,14 +48,23 @@ pub(crate) fn path_key(path: &Path) -> PathBuf {
 /// Resolve `path` to a canonical form, falling back to resolving the parent
 /// directory when the path itself does not exist yet (fresh save targets).
 fn resolve(path: &Path) -> PathBuf {
-    if let Ok(canonical) = std::fs::canonicalize(path) {
-        return strip_extended_prefix(&canonical);
-    }
-    if let (Some(parent), Some(name)) = (path.parent(), path.file_name()) {
-        if !parent.as_os_str().is_empty() {
-            if let Ok(canonical) = std::fs::canonicalize(parent) {
-                return strip_extended_prefix(&canonical).join(name);
+    // Resolve the nearest existing ancestor, including symlinks, then normalize
+    // the remaining components. Fresh nested save targets must not retain `..`.
+    for ancestor in path.ancestors() {
+        if let Ok(canonical) = std::fs::canonicalize(ancestor) {
+            let mut resolved = strip_extended_prefix(&canonical);
+            if let Ok(suffix) = path.strip_prefix(ancestor) {
+                for component in suffix.components() {
+                    match component {
+                        std::path::Component::ParentDir => {
+                            resolved.pop();
+                        }
+                        std::path::Component::Normal(name) => resolved.push(name),
+                        _ => {}
+                    }
+                }
             }
+            return resolved;
         }
     }
     path.to_path_buf()
@@ -73,7 +85,10 @@ fn strip_extended_prefix(path: &Path) -> PathBuf {
 }
 
 /// Directories and files the backend owns by itself, independent of any dialog.
-async fn allowed_roots(app: &AppHandle, state: &State<'_, AppState>) -> Result<Vec<PathBuf>, String> {
+async fn allowed_roots(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+) -> Result<Vec<PathBuf>, String> {
     let mut roots = Vec::new();
     for folder in state.database.load_folders().await? {
         push_root(&mut roots, &folder.path);
@@ -97,14 +112,11 @@ fn push_root(roots: &mut Vec<PathBuf>, raw: &str) {
 }
 
 fn is_allowed(path: &Path, roots: &[PathBuf], grants: &HashSet<PathBuf>) -> bool {
-    if roots.iter().chain(grants).any(|root| path.starts_with(root)) {
-        return true;
-    }
     let resolved = resolve(path);
     roots
         .iter()
         .chain(grants)
-        .any(|root| resolved.starts_with(root) || resolved.starts_with(resolve(root)))
+        .any(|root| resolved.starts_with(resolve(root)))
 }
 
 pub(crate) async fn ensure_allowed(
@@ -278,49 +290,29 @@ mod tests {
     fn library_roots_cover_nested_tracks() {
         let roots = [PathBuf::from(r"D:\Music")];
         assert!(allowed(Path::new(r"D:\Music\a.mp3"), &roots, &[]));
-        assert!(allowed(
-            Path::new(r"D:\Music\album\a.mp3"),
-            &roots,
-            &[]
-        ));
+        assert!(allowed(Path::new(r"D:\Music\album\a.mp3"), &roots, &[]));
         assert!(!allowed(Path::new(r"D:\Other\a.mp3"), &roots, &[]));
     }
 
     #[test]
     fn grant_covers_the_file_itself_and_nothing_else() {
         let grants = [PathBuf::from(r"D:\Temp\cover.jpg")];
-        assert!(allowed(
-            Path::new(r"D:\Temp\cover.jpg"),
-            &[],
-            &grants
-        ));
+        assert!(allowed(Path::new(r"D:\Temp\cover.jpg"), &[], &grants));
         assert!(!allowed(Path::new(r"D:\Temp\other.jpg"), &[], &grants));
     }
 
     #[test]
     fn directory_grant_covers_its_children() {
         let grants = [PathBuf::from(r"D:\Exports")];
-        assert!(allowed(
-            Path::new(r"D:\Exports\song.lrc"),
-            &[],
-            &grants
-        ));
-        assert!(!allowed(
-            Path::new(r"D:\Exported\song.lrc"),
-            &[],
-            &grants
-        ));
+        assert!(allowed(Path::new(r"D:\Exports\song.lrc"), &[], &grants));
+        assert!(!allowed(Path::new(r"D:\Exported\song.lrc"), &[], &grants));
     }
 
     #[test]
     fn parent_directories_are_not_granted_by_a_file_grant() {
         let grants = [PathBuf::from(r"D:\Temp\cover.jpg")];
         assert!(!allowed(Path::new(r"D:\Temp"), &[], &grants));
-        assert!(!allowed(
-            Path::new(r"D:\Temp\secret.txt"),
-            &[],
-            &grants
-        ));
+        assert!(!allowed(Path::new(r"D:\Temp\secret.txt"), &[], &grants));
     }
 
     #[test]

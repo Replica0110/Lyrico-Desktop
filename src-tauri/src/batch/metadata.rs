@@ -1,13 +1,11 @@
 use super::lyrics::render_plugin_lyrics;
 use super::processor::{BatchProcessor, ProcessContext, ProcessError, ProcessOutcome};
-use crate::audio::{read_track, save_tags, ArtworkMode};
+use crate::audio::{read_track, save_tag_fields, ArtworkMode};
 use crate::lyrics::LineTrack;
 use crate::models::{AudioTrack, TagUpdate};
 use crate::paths::resolve_data_paths;
 use crate::plugins::manifest::SourcePlugin;
 use crate::plugins::{installer, runtime};
-use base64::engine::general_purpose::STANDARD;
-use base64::Engine;
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -15,7 +13,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::sync::LazyLock;
-use std::time::Duration;
 
 static VERSION_NOISE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?i)[(\[（【《]?\s*(?:official\s*(?:video|audio|mv)|music\s*video|lyric[s]?\s*video|lyrics?|完整版|高清|无损|动态歌词|歌词版|instrumental|inst\.?|off\s*vocal|伴奏|纯音乐|live|现场版?|remix|remaster(?:ed)?|acoustic|cover|sped\s*up|slowed|nightcore|demo|edit|radio\s*edit|deluxe|bonus\s*track)\s*[)\]）】》]?"#).unwrap()
@@ -218,7 +215,7 @@ impl BatchProcessor for MatchMetadataProcessor {
         let cover_data_url = if should_write(&config, "cover_url", !current.has_cover) {
             fields
                 .get("cover_url")
-                .and_then(|url| match fetch_remote_image(url) {
+                .and_then(|url| match crate::remote_image::fetch(url, None) {
                     Ok(image) => Some(image),
                     Err(error) => {
                         log_source_warning(
@@ -247,7 +244,8 @@ impl BatchProcessor for MatchMetadataProcessor {
         if changed_fields.is_empty() {
             return Err(ProcessError::Skipped("No fields to update".to_string()));
         }
-        let updated = save_tags(update, context.artist_separator).map_err(ProcessError::Failed)?;
+        let updated = save_tag_fields(update, context.artist_separator, &changed_fields)
+            .map_err(ProcessError::Failed)?;
         on_progress(1.0);
         Ok(ProcessOutcome {
             result_json: Some(
@@ -324,9 +322,10 @@ fn ordered_search_plugins(
     let mut plugins: Vec<_> = plugins
         .into_iter()
         .filter(|plugin| {
-            plugin
-                .source_state("metadata")
-                .is_some_and(|state| state.enabled)
+            plugin.enabled
+                && plugin
+                    .source_state("metadata")
+                    .is_some_and(|state| state.enabled)
                 && (enabled_order.is_empty()
                     || enabled_order.iter().any(|id| id == &plugin.manifest.id))
                 && plugin
@@ -864,6 +863,7 @@ fn build_update(
     });
     (
         TagUpdate {
+            custom_tags: None,
             path: current.path.clone(),
             title,
             artist: normalize_separator(&artist, artist_separator),
@@ -926,43 +926,6 @@ fn numeric_field(
     } else {
         current
     }
-}
-
-fn fetch_remote_image(url: &str) -> Result<String, String> {
-    let parsed = reqwest::Url::parse(url).map_err(|error| error.to_string())?;
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return Err("Only HTTP and HTTPS image URLs are supported".to_string());
-    }
-    let response = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|error| error.to_string())?
-        .get(parsed)
-        .send()
-        .and_then(reqwest::blocking::Response::error_for_status)
-        .map_err(|error| error.to_string())?;
-    let mime = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(';').next())
-        .unwrap_or("application/octet-stream")
-        .to_string();
-    if !mime.starts_with("image/") {
-        return Err(format!("Remote resource is not an image: {mime}"));
-    }
-    if response
-        .content_length()
-        .is_some_and(|length| length > 20 * 1024 * 1024)
-    {
-        return Err("Remote image is larger than 20 MB".to_string());
-    }
-    let bytes = response.bytes().map_err(|error| error.to_string())?;
-    if bytes.len() > 20 * 1024 * 1024 {
-        return Err("Remote image is larger than 20 MB".to_string());
-    }
-    image::load_from_memory(&bytes).map_err(|error| error.to_string())?;
-    Ok(format!("data:{mime};base64,{}", STANDARD.encode(bytes)))
 }
 
 #[cfg(test)]

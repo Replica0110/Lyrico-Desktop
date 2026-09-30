@@ -17,7 +17,7 @@ use crate::plugins::installer as plugin_installer;
 use crate::plugins::manifest::{PluginInstallPreview, PluginInstallResult, SourcePlugin};
 use crate::plugins::runtime as plugin_runtime;
 use crate::replay_gain::analyze_track;
-use crate::taglib_bridge;
+
 use crate::AppState;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -123,7 +123,14 @@ pub(crate) async fn set_source_plugin_enabled(
     locale: Option<String>,
 ) -> Result<Vec<SourcePlugin>, String> {
     let paths = resolve_data_paths(&app)?;
-    plugin_installer::set_enabled(&state.database, &paths.plugins, &plugin_id, enabled, locale.as_deref()).await
+    plugin_installer::set_enabled(
+        &state.database,
+        &paths.plugins,
+        &plugin_id,
+        enabled,
+        locale.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -147,7 +154,14 @@ pub(crate) async fn save_source_plugin_settings(
     locale: Option<String>,
 ) -> Result<Vec<SourcePlugin>, String> {
     let paths = resolve_data_paths(&app)?;
-    plugin_installer::save_settings(&state.database, &paths.plugins, &plugin_id, config, locale.as_deref()).await
+    plugin_installer::save_settings(
+        &state.database,
+        &paths.plugins,
+        &plugin_id,
+        config,
+        locale.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -158,7 +172,13 @@ pub(crate) async fn uninstall_source_plugin(
     locale: Option<String>,
 ) -> Result<Vec<SourcePlugin>, String> {
     let paths = resolve_data_paths(&app)?;
-    plugin_installer::uninstall(&state.database, &paths.plugins, &plugin_id, locale.as_deref()).await
+    plugin_installer::uninstall(
+        &state.database,
+        &paths.plugins,
+        &plugin_id,
+        locale.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -188,174 +208,9 @@ pub(crate) async fn fetch_remote_image(
     url: String,
     max_size: Option<u32>,
 ) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || fetch_remote_image_blocking(&url, max_size))
+    tauri::async_runtime::spawn_blocking(move || crate::remote_image::fetch(&url, max_size))
         .await
         .map_err(|error| error.to_string())?
-}
-
-const REMOTE_IMAGE_MAX_REDIRECTS: usize = 5;
-
-fn fetch_remote_image_blocking(url: &str, max_size: Option<u32>) -> Result<String, String> {
-    let mut current = reqwest::Url::parse(url).map_err(|error| error.to_string())?;
-    for _ in 0..=REMOTE_IMAGE_MAX_REDIRECTS {
-        if !matches!(current.scheme(), "http" | "https") {
-            return Err("Only HTTP and HTTPS image URLs are supported".to_string());
-        }
-        let pinned = ensure_public_image_url(&current)?;
-        let client = build_pinned_image_client(current.host_str(), pinned)?;
-        let response = client
-            .get(current.clone())
-            .send()
-            .map_err(|error| error.to_string())?;
-        if !response.status().is_redirection() {
-            let response = response.error_for_status().map_err(|error| error.to_string())?;
-            return encode_image_response(response, max_size);
-        }
-        let location = response
-            .headers()
-            .get(reqwest::header::LOCATION)
-            .and_then(|value| value.to_str().ok())
-            .ok_or_else(|| "Image URL redirected without a Location header".to_string())?;
-        current = current
-            .join(location)
-            .map_err(|error| format!("Image URL redirected to an invalid location: {error}"))?;
-    }
-    Err("Too many redirects while fetching the image".to_string())
-}
-
-fn build_pinned_image_client(
-    host: Option<&str>,
-    pinned: Option<std::net::SocketAddr>,
-) -> Result<reqwest::blocking::Client, String> {
-    let mut builder = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(20))
-        .redirect(reqwest::redirect::Policy::none());
-    if let (Some(domain), Some(address)) = (host, pinned) {
-        let bare = domain
-            .strip_prefix('[')
-            .and_then(|rest| rest.strip_suffix(']'))
-            .unwrap_or(domain);
-        builder = builder.resolve(bare, address);
-    }
-    builder.build().map_err(|error| error.to_string())
-}
-
-fn encode_image_response(
-    response: reqwest::blocking::Response,
-    max_size: Option<u32>,
-) -> Result<String, String> {
-    let mime = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(';').next())
-        .unwrap_or("application/octet-stream")
-        .to_string();
-    if !mime.starts_with("image/") {
-        return Err(format!("Remote resource is not an image: {mime}"));
-    }
-    if response
-        .content_length()
-        .is_some_and(|length| length > 20 * 1024 * 1024)
-    {
-        return Err("Remote image is larger than 20 MB".to_string());
-    }
-    let bytes = response.bytes().map_err(|error| error.to_string())?;
-    if bytes.len() > 20 * 1024 * 1024 {
-        return Err("Remote image is larger than 20 MB".to_string());
-    }
-    use base64::Engine;
-    if let Some(max_size) = max_size {
-        let max_size = max_size.clamp(64, 4096);
-        let image = image::load_from_memory(&bytes).map_err(|error| error.to_string())?;
-        let resized = image.thumbnail(max_size, max_size);
-        let mut output = std::io::Cursor::new(Vec::new());
-        resized
-            .write_to(&mut output, image::ImageFormat::Png)
-            .map_err(|error| error.to_string())?;
-        return Ok(format!(
-            "data:image/png;base64,{}",
-            base64::engine::general_purpose::STANDARD.encode(output.into_inner())
-        ));
-    }
-    Ok(format!(
-        "data:{mime};base64,{}",
-        base64::engine::general_purpose::STANDARD.encode(bytes)
-    ))
-}
-
-fn ensure_public_image_url(url: &reqwest::Url) -> Result<Option<std::net::SocketAddr>, String> {
-    use std::net::ToSocketAddrs;
-    let host = url
-        .host_str()
-        .ok_or_else(|| "Image URL has no host".to_string())?;
-    let bare = host
-        .strip_prefix('[')
-        .and_then(|rest| rest.strip_suffix(']'))
-        .unwrap_or(host);
-    if let Ok(address) = bare.parse::<std::net::IpAddr>() {
-        ensure_public_image_ip(address)?;
-        return Ok(None);
-    }
-    let port = url.port_or_known_default().unwrap_or(443);
-    let mut pinned: Option<std::net::SocketAddr> = None;
-    for address in (bare, port)
-        .to_socket_addrs()
-        .map_err(|error| format!("Failed to resolve image host {host}: {error}"))?
-    {
-        ensure_public_image_ip(address.ip())?;
-        if pinned.is_none() {
-            pinned = Some(address);
-        }
-    }
-    match pinned {
-        Some(address) => Ok(Some(address)),
-        None => Err(format!("Image host {host} did not resolve to any address")),
-    }
-}
-
-fn ensure_public_image_ip(address: std::net::IpAddr) -> Result<(), String> {
-    let is_public = match address {
-        std::net::IpAddr::V4(ip) => is_public_image_ipv4(ip),
-        std::net::IpAddr::V6(ip) => is_public_image_ipv6(ip),
-    };
-    if is_public {
-        Ok(())
-    } else {
-        Err(format!(
-            "Refusing to fetch an image from a non-public address: {address}"
-        ))
-    }
-}
-
-fn is_public_image_ipv4(ip: std::net::Ipv4Addr) -> bool {
-    let octets = ip.octets();
-    !(ip.is_loopback()
-        || ip.is_private()
-        || ip.is_link_local()
-        || ip.is_unspecified()
-        || ip.is_broadcast()
-        || ip.is_documentation()
-        || octets[0] == 0
-        || (octets[0] == 100 && (octets[1] & 0xc0) == 64)
-        || (octets[0] == 192 && octets[1] == 0 && octets[2] == 0)
-        || (octets[0] == 198 && (octets[1] == 18 || octets[1] == 19))
-        || octets[0] >= 224)
-}
-
-fn is_public_image_ipv6(ip: std::net::Ipv6Addr) -> bool {
-    if let Some(mapped) = ip.to_ipv4_mapped() {
-        return is_public_image_ipv4(mapped);
-    }
-    let segments = ip.segments();
-    !(ip.is_loopback()
-        || ip.is_unspecified()
-        || ip.is_multicast()
-        || segments[0] == 0
-        || (segments[0] & 0xfe00) == 0xfc00
-        || (segments[0] & 0xffc0) == 0xfe80
-        || (segments[0] == 0x2001 && segments[1] == 0xdb8)
-        || (segments[0] == 0x0064 && segments[1] == 0xff9b))
 }
 
 #[tauri::command]
@@ -364,8 +219,23 @@ pub(crate) async fn create_batch_task(
     state: State<'_, AppState>,
     task_type: String,
     song_paths: Vec<String>,
-    config_json: Option<String>,
+    mut config_json: Option<String>,
 ) -> Result<BatchTask, String> {
+    if task_type == "replayGain" {
+        let mut config: serde_json::Value = match config_json.as_deref() {
+            Some(raw) => serde_json::from_str(raw)
+                .map_err(|error| format!("Invalid task config: {error}"))?,
+            None => serde_json::json!({}),
+        };
+        let object = config
+            .as_object_mut()
+            .ok_or("Task config must be an object")?;
+        object.insert(
+            "targetLoudness".into(),
+            serde_json::json!(app_config::load_desktop_settings(&app)?.replay_gain_target_loudness),
+        );
+        config_json = Some(config.to_string());
+    }
     path_access::ensure_all_allowed(&app, &state, &song_paths).await?;
     if let Some(destination) = batch_export_destination(&config_json) {
         path_access::ensure_allowed(&app, &state, Path::new(&destination)).await?;
@@ -621,7 +491,7 @@ pub(crate) async fn scan_folder(
         }
     }
     let job_id = format!("scan-{}", NEXT_SCAN_ID.fetch_add(1, Ordering::Relaxed));
-    let scan_signature = format!("audio-summary-v1|artist-separator={artist_separator}");
+    let scan_signature = format!("audio-summary-taglib-v2|artist-separator={artist_separator}");
     let existing_index = match state
         .database
         .load_folder_index(&folder_path, &scan_signature)
@@ -678,7 +548,11 @@ pub(crate) async fn scan_folder(
             .database
             .persist_folder_scan(&folder_path, &scan_signature, &scan.tracks)
             .await?;
-        let mut tracks = scan.tracks;
+        let mut tracks = scan
+            .tracks
+            .into_iter()
+            .map(AudioTrack::into_summary)
+            .collect::<Vec<_>>();
         let stored_paths = tracks
             .iter()
             .map(|track| track.path.clone())
@@ -814,9 +688,10 @@ pub(crate) async fn save_audio_tags(
 ) -> Result<AudioTrack, String> {
     path_access::ensure_allowed(&app, &state, Path::new(&update.path)).await?;
     let artist_separator = app_config::load_artist_split_config(&app)?.artist_separator;
-    let mut saved = tauri::async_runtime::spawn_blocking(move || save_tags(update, &artist_separator))
-        .await
-        .map_err(|error| error.to_string())??;
+    let mut saved =
+        tauri::async_runtime::spawn_blocking(move || save_tags(update, &artist_separator))
+            .await
+            .map_err(|error| error.to_string())??;
     state.database.update_track_summary(&saved).await?;
     let (_, added_at) = state.database.load_track_timestamps(&saved.path).await?;
     saved.added_at = added_at;
@@ -968,24 +843,9 @@ pub(crate) async fn load_custom_tags(
     path: String,
 ) -> Result<Vec<CustomTag>, String> {
     path_access::ensure_allowed(&app, &state, Path::new(&path)).await?;
-    tauri::async_runtime::spawn_blocking(move || taglib_bridge::read_custom_tags(Path::new(&path)))
+    tauri::async_runtime::spawn_blocking(move || crate::audio::read_custom_tags(Path::new(&path)))
         .await
         .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-pub(crate) async fn save_custom_tags(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    path: String,
-    tags: Vec<CustomTag>,
-) -> Result<(), String> {
-    path_access::ensure_allowed(&app, &state, Path::new(&path)).await?;
-    tauri::async_runtime::spawn_blocking(move || {
-        taglib_bridge::write_custom_tags(Path::new(&path), &tags)
-    })
-    .await
-    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -1140,11 +1000,11 @@ fn scan_tracks(
                 paths
                     .par_iter()
                     .filter_map(|path| {
-                        let track = unchanged_track(path, existing_index).or_else(|| {
-                            read_track(path, artist_separator, ArtworkMode::None)
-                                .ok()
-                                .map(AudioTrack::into_summary)
-                        }).filter(|track| !should_skip_short_audio(track.duration_seconds, ignore_short_audio));
+                        let track = unchanged_track(path, existing_index)
+                            .or_else(|| read_track(path, artist_separator, ArtworkMode::None).ok())
+                            .filter(|track| {
+                                !should_skip_short_audio(track.duration_seconds, ignore_short_audio)
+                            });
                         if track.is_none() {
                             errors.fetch_add(1, Ordering::Relaxed);
                         }
@@ -1171,11 +1031,11 @@ fn scan_tracks(
             paths
                 .iter()
                 .filter_map(|path| {
-                    unchanged_track(path, existing_index).or_else(|| {
-                        read_track(path, artist_separator, ArtworkMode::None)
-                            .ok()
-                            .map(AudioTrack::into_summary)
-                    }).filter(|track| !should_skip_short_audio(track.duration_seconds, ignore_short_audio))
+                    unchanged_track(path, existing_index)
+                        .or_else(|| read_track(path, artist_separator, ArtworkMode::None).ok())
+                        .filter(|track| {
+                            !should_skip_short_audio(track.duration_seconds, ignore_short_audio)
+                        })
                 })
                 .collect()
         });
@@ -1254,77 +1114,6 @@ mod tests {
         assert!(should_skip_short_audio(1, true));
         assert!(!should_skip_short_audio(61, true));
         assert!(!should_skip_short_audio(1, false));
-    }
-
-    #[test]
-    fn image_ip_filter_blocks_private_and_reserved_ipv4_ranges() {
-        for address in [
-            "0.0.0.0",
-            "10.0.0.1",
-            "100.64.0.1",
-            "127.0.0.1",
-            "169.254.169.254",
-            "172.16.0.1",
-            "172.31.255.254",
-            "192.0.0.1",
-            "192.0.2.1",
-            "192.168.1.1",
-            "198.18.0.1",
-            "198.51.100.1",
-            "203.0.113.1",
-            "224.0.0.1",
-            "255.255.255.255",
-        ] {
-            let ip: std::net::Ipv4Addr = address.parse().expect("valid test address");
-            assert!(!is_public_image_ipv4(ip), "{address} must be blocked");
-        }
-        for address in ["1.1.1.1", "8.8.8.8", "93.184.216.34", "172.32.0.1"] {
-            let ip: std::net::Ipv4Addr = address.parse().expect("valid test address");
-            assert!(is_public_image_ipv4(ip), "{address} must be allowed");
-        }
-    }
-
-    #[test]
-    fn image_ip_filter_blocks_private_and_reserved_ipv6_ranges() {
-        for address in [
-            "::",
-            "::1",
-            "::ffff:192.168.1.1",
-            "fc00::1",
-            "fd12:3456::1",
-            "fe80::1",
-            "ff02::1",
-            "2001:db8::1",
-            "64:ff9b::1",
-        ] {
-            let ip: std::net::Ipv6Addr = address.parse().expect("valid test address");
-            assert!(!is_public_image_ipv6(ip), "{address} must be blocked");
-        }
-        for address in ["2606:4700:4700::1111", "2001:4860:4860::8888"] {
-            let ip: std::net::Ipv6Addr = address.parse().expect("valid test address");
-            assert!(is_public_image_ipv6(ip), "{address} must be allowed");
-        }
-    }
-
-    #[test]
-    fn image_url_filter_blocks_literal_internal_hosts_without_resolving_dns() {
-        for url in [
-            "http://127.0.0.1/cover.jpg",
-            "http://[::1]/cover.jpg",
-            "http://10.1.2.3/cover.jpg",
-            "http://169.254.169.254/latest/meta-data",
-        ] {
-            let parsed = reqwest::Url::parse(url).expect("valid test url");
-            assert!(
-                ensure_public_image_url(&parsed).is_err(),
-                "{url} must be blocked"
-            );
-        }
-        let parsed = reqwest::Url::parse("https://8.8.8.8/cover.jpg").expect("valid test url");
-        assert!(
-            ensure_public_image_url(&parsed).is_ok_and(|pinned| pinned.is_none()),
-            "an IP literal host resolves locally and needs no DNS pinning"
-        );
     }
 
     #[test]

@@ -17,7 +17,6 @@ import {
   readTextFile,
   removeLibraryFolder,
   saveAudioTags,
-  saveCustomTags,
   saveArtistSplitConfig,
   analyzeReplayGain,
   cancelBatchTask,
@@ -466,7 +465,7 @@ function LyricoDesktop() {
     try {
       const [fullTrack, customTags] = await Promise.all([
         loadLibraryTrack(path),
-        loadCustomTags(path).catch(() => []),
+        loadCustomTags(path),
       ]);
       if (requestId === detailRequest.current) {
         setDetailTrack(fullTrack);
@@ -486,7 +485,7 @@ function LyricoDesktop() {
     try {
       const [refreshed, customTags] = await Promise.all([
         readAudioFile(requestedPath),
-        loadCustomTags(requestedPath).catch(() => []),
+        loadCustomTags(requestedPath),
       ]);
       replaceTrack(refreshed);
       if (editingPathRef.current !== requestedPath) return;
@@ -511,7 +510,6 @@ function LyricoDesktop() {
       await form.validateFields();
       const values = completeTagForm(form.getFieldsValue(true), selectedTrack);
       const saved = await saveAudioTags(requestedPath, values);
-      await saveCustomTags(requestedPath, values.customTags);
       replaceTrack(saved);
       setSelectedPath(saved.path);
       if (editingPathRef.current === requestedPath) {

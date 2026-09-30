@@ -173,10 +173,6 @@ fn write_with_conflict_suffix(
 mod tests {
     use super::*;
     use crate::audio::write_lyrics_tag;
-    use lofty::config::WriteOptions;
-    use lofty::file::TaggedFileExt;
-    use lofty::picture::{Picture, PictureType};
-    use lofty::tag::TagExt;
 
     fn temporary_directory(name: &str) -> PathBuf {
         let directory = std::env::temp_dir().join(format!(
@@ -252,17 +248,15 @@ mod tests {
         write_lyrics_tag(&target, "/", lyrics.to_string()).expect("lyrics should write");
 
         let cover_bytes = b"test-cover-bytes".to_vec();
-        let mut tagged_file = lofty::read_from_path(&target).expect("fixture should read");
-        let tag = tagged_file
-            .primary_tag_mut()
-            .expect("fixture should have a primary tag");
-        tag.push_picture(
-            Picture::unchecked(cover_bytes.clone())
-                .pic_type(PictureType::CoverFront)
-                .build(),
-        );
-        tag.save_to_path(&target, WriteOptions::new())
-            .expect("cover should write");
+        crate::file_mutation::write_copy(&target, |temporary| {
+            let mut file = crate::taglib_bridge::File::open(temporary, false)?;
+            file.set_cover(Some(&crate::taglib_bridge::Cover {
+                mime: "image/jpeg".into(),
+                data: cover_bytes.clone(),
+            }))?;
+            file.save()
+        })
+        .expect("cover should write");
 
         let (lyrics_extension, exported_lyrics) =
             load_export_contents("exportLyrics", &target, "/").expect("lyrics should export");

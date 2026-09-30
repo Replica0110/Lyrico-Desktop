@@ -1,0 +1,3 @@
+[submodule "src-tauri/native/taglib-src"]
+	path = src-tauri/native/taglib-src
+	url = https://github.com/taglib/taglib.git

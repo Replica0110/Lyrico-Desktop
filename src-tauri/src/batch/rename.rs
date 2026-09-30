@@ -82,29 +82,31 @@ fn execute_rename(
     planned_path: &Path,
     artist_separator: &str,
 ) -> Result<AudioTrack, String> {
-    validate_planned_path(original_path, planned_path)?;
-    if planned_path.exists() {
-        return Err(format!(
-            "Rename target already exists: {}",
-            planned_path.display()
-        ));
-    }
-    std::fs::rename(original_path, planned_path).map_err(|error| {
-        format!(
-            "Failed to rename {} to {}: {error}",
-            original_path.display(),
-            planned_path.display()
-        )
-    })?;
-    match read_track(planned_path, artist_separator, ArtworkMode::None) {
-        Ok(track) => Ok(track),
-        Err(error) => {
-            let _ = std::fs::rename(planned_path, original_path);
-            Err(format!(
-                "Renamed file could not be read and was rolled back: {error}"
-            ))
+    crate::file_mutation::with_file_lock(original_path, || {
+        validate_planned_path(original_path, planned_path)?;
+        if planned_path.exists() {
+            return Err(format!(
+                "Rename target already exists: {}",
+                planned_path.display()
+            ));
         }
-    }
+        std::fs::rename(original_path, planned_path).map_err(|error| {
+            format!(
+                "Failed to rename {} to {}: {error}",
+                original_path.display(),
+                planned_path.display()
+            )
+        })?;
+        match read_track(planned_path, artist_separator, ArtworkMode::None) {
+            Ok(track) => Ok(track),
+            Err(error) => {
+                let _ = std::fs::rename(planned_path, original_path);
+                Err(format!(
+                    "Renamed file could not be read and was rolled back: {error}"
+                ))
+            }
+        }
+    })
 }
 
 pub(crate) fn generate_previews(

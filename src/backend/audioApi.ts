@@ -32,10 +32,6 @@ export async function loadCustomTags(path: string) {
   return invoke<CustomTag[]>("load_custom_tags", { path });
 }
 
-export async function saveCustomTags(path: string, tags: CustomTag[]) {
-  return invoke<void>("save_custom_tags", { path, tags });
-}
-
 export async function readImageFile(path: string) {
   return invoke<string>("read_image_file", { path });
 }

@@ -450,12 +450,10 @@ fn validate_manifest(manifest: &PluginManifest) -> Result<(), String> {
         ));
     }
     if !manifest.capabilities.is_empty()
-        && !manifest.capabilities.iter().any(|value| {
-            matches!(
-                value.as_str(),
-                "searchSongs" | "getLyrics" | "searchCovers"
-            )
-        })
+        && !manifest
+            .capabilities
+            .iter()
+            .any(|value| matches!(value.as_str(), "searchSongs" | "getLyrics" | "searchCovers"))
     {
         return Err("A source plugin must support searchSongs".to_string());
     }
@@ -663,9 +661,7 @@ fn source_from_record(
     }
     if let Some(locale) = locale {
         let preferred = [locale.to_string()];
-        if let Ok(localized) =
-            super::i18n::localize_manifest(&manifest, &plugin_dir, &preferred)
-        {
+        if let Ok(localized) = super::i18n::localize_manifest(&manifest, &plugin_dir, &preferred) {
             manifest = localized;
         }
     }
@@ -685,7 +681,7 @@ fn source_from_record(
     let supports = |capability: &str| capabilities.contains(&capability);
     let has_explicit_source_flags =
         record.metadata_enabled || record.lyrics_enabled || record.cover_enabled;
-    let source_enabled = |flag: bool| flag || (record.enabled && !has_explicit_source_flags);
+    let source_enabled = |flag: bool| record.enabled && (flag || !has_explicit_source_flags);
     let mut source_states = BTreeMap::new();
     if ["searchSongs", "getLyrics", "searchCovers"]
         .iter()

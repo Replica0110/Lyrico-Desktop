@@ -14,11 +14,19 @@ impl BatchProcessor for DeleteFilesProcessor {
             return Err(ProcessError::Cancelled("Batch item cancelled".to_string()));
         }
         let path = Path::new(&context.item.song_path);
-        tauri::async_runtime::block_on(context.database.remove_library_track(&context.item.song_path))
-            .map_err(ProcessError::Failed)?;
-        on_progress(0.5);
-        std::fs::remove_file(path)
-            .map_err(|error| ProcessError::Failed(error.to_string()))?;
+        crate::file_mutation::with_file_lock(path, || {
+            std::fs::remove_file(path).map_err(|error| error.to_string())?;
+            on_progress(0.5);
+            tauri::async_runtime::block_on(
+                context
+                    .database
+                    .remove_library_track(&context.item.song_path),
+            )
+            .map_err(|error| {
+                format!("File deleted but library update failed; rescan the folder: {error}")
+            })
+        })
+        .map_err(ProcessError::Failed)?;
         on_progress(1.0);
         Ok(ProcessOutcome {
             result_json: None,

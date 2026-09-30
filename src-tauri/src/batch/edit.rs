@@ -1,5 +1,5 @@
 use super::processor::{BatchProcessor, ProcessContext, ProcessError, ProcessOutcome};
-use crate::audio::{read_image_data_url, read_track, save_tags, ArtworkMode};
+use crate::audio::{read_image_data_url, read_track, save_tag_fields, ArtworkMode};
 use crate::lyrics::{self, LyricsOptions};
 use crate::models::{AudioTrack, TagUpdate};
 use serde::Deserialize;
@@ -65,7 +65,8 @@ impl BatchProcessor for EditTagsProcessor {
         if context.cancelled.load(Ordering::Relaxed) {
             return Err(ProcessError::Cancelled("Batch item cancelled".to_string()));
         }
-        let updated = save_tags(update, context.artist_separator).map_err(ProcessError::Failed)?;
+        let updated = save_tag_fields(update, context.artist_separator, &changed_fields)
+            .map_err(ProcessError::Failed)?;
         Ok(ProcessOutcome {
             result_json: Some(json!({ "changedFields": changed_fields }).to_string()),
             updated_track: Some(updated),
@@ -241,6 +242,7 @@ fn build_update(
 
     Ok((
         TagUpdate {
+            custom_tags: None,
             path: current.path.clone(),
             title,
             artist,
@@ -373,7 +375,7 @@ mod tests {
         update.path = target.to_string_lossy().into_owned();
         assert!(changed.iter().any(|field| field == "title"));
         assert!(changed.iter().any(|field| field == "lyrics"));
-        save_tags(update, "/").expect("batch edit tags should write");
+        crate::audio::save_tags(update, "/").expect("batch edit tags should write");
         let after = read_track(&target, "/", ArtworkMode::None)
             .expect("batch edit tags should read back from disk");
         assert_eq!(after.title, "批量编辑写后重读");

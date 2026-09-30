@@ -1,210 +1,215 @@
-use std::ffi::CString;
+//! Safe, thread-confined ownership of a TagLib file. Business rules belong in audio.rs.
+use std::collections::BTreeMap;
+use std::ffi::{c_char, c_void, CStr, CString};
+use std::marker::PhantomData;
 use std::path::Path;
-use std::collections::HashSet;
+use std::ptr::NonNull;
+use std::rc::Rc;
 
-use crate::models::CustomTag;
-
-#[cfg(target_os = "windows")]
+pub(crate) type Properties = BTreeMap<String, Vec<String>>;
+#[derive(Default)]
+#[repr(C)]
+pub(crate) struct AudioProperties {
+    pub duration_ms: i64,
+    pub bitrate: i32,
+    pub sample_rate: i32,
+    pub channels: i32,
+    pub has_cover: i32,
+}
+#[derive(Clone)]
+pub(crate) struct Cover {
+    pub mime: String,
+    pub data: Vec<u8>,
+}
 unsafe extern "C" {
-    fn lyrico_taglib_list_properties(path: *const i8, output: *mut i8, capacity: usize) -> i32;
-    fn lyrico_taglib_read_property(
-        path: *const i8,
-        key: *const i8,
-        output: *mut i8,
-        capacity: usize,
+    fn lyrico_taglib_open(path: *const c_char, audio_properties: i32) -> *mut c_void;
+    fn lyrico_taglib_close(handle: *mut c_void);
+    fn lyrico_taglib_error() -> *const c_char;
+    fn lyrico_taglib_free(buffer: *mut u8);
+    fn lyrico_taglib_properties(handle: *mut c_void, output: *mut *mut u8, size: *mut usize)
+        -> i32;
+    fn lyrico_taglib_audio_properties(handle: *mut c_void, output: *mut AudioProperties) -> i32;
+    fn lyrico_taglib_cover(handle: *mut c_void, output: *mut *mut u8, size: *mut usize) -> i32;
+    fn lyrico_taglib_set_property(
+        handle: *mut c_void,
+        key: *const c_char,
+        data: *const u8,
+        size: usize,
     ) -> i32;
-    fn lyrico_taglib_write_property(
-        path: *const i8,
-        key: *const i8,
-        values: *const i8,
+    fn lyrico_taglib_set_cover(
+        handle: *mut c_void,
+        data: *const u8,
+        size: usize,
+        mime: *const c_char,
     ) -> i32;
+    fn lyrico_taglib_save(handle: *mut c_void) -> i32;
 }
 
-#[cfg(target_os = "windows")]
-pub(crate) fn list_properties(path: &Path) -> Result<Vec<String>, String> {
-    let path = CString::new(path.to_string_lossy().as_bytes()).map_err(|error| error.to_string())?;
-    let mut buffer = vec![0_i8; 1024 * 1024];
-    let ok = unsafe {
-        lyrico_taglib_list_properties(path.as_ptr(), buffer.as_mut_ptr(), buffer.len())
-    };
-    if ok == 0 {
-        return Err("TagLib could not read this audio file".to_string());
-    }
-    let bytes = unsafe {
-        std::slice::from_raw_parts(buffer.as_ptr().cast::<u8>(), buffer.len())
-    };
-    let text = std::ffi::CStr::from_bytes_until_nul(bytes)
-        .map_err(|error| error.to_string())?
-        .to_string_lossy();
-    Ok(text.lines().map(str::to_string).collect())
+pub(crate) struct File {
+    handle: NonNull<c_void>,
+    // Handles must be opened, used and dropped on the same blocking worker.
+    _thread: PhantomData<Rc<()>>,
 }
-
-#[cfg(target_os = "windows")]
-pub(crate) fn read_property(path: &Path, key: &str) -> Result<Vec<String>, String> {
-    let path = CString::new(path.to_string_lossy().as_bytes()).map_err(|error| error.to_string())?;
-    let key = CString::new(key).map_err(|error| error.to_string())?;
-    let mut buffer = vec![0_i8; 1024 * 1024];
-    let ok = unsafe {
-        lyrico_taglib_read_property(path.as_ptr(), key.as_ptr(), buffer.as_mut_ptr(), buffer.len())
-    };
-    if ok == 0 {
-        return Err("TagLib could not read this property".to_string());
+impl Drop for File {
+    fn drop(&mut self) {
+        unsafe { lyrico_taglib_close(self.handle.as_ptr()) }
     }
-    let bytes = unsafe {
-        std::slice::from_raw_parts(buffer.as_ptr().cast::<u8>(), buffer.len())
-    };
-    let text = std::ffi::CStr::from_bytes_until_nul(bytes)
-        .map_err(|error| error.to_string())?
-        .to_string_lossy();
-    Ok(text.lines().map(str::to_string).collect())
 }
-
-#[cfg(target_os = "windows")]
-pub(crate) fn write_property(path: &Path, key: &str, values: &[String]) -> Result<(), String> {
-    let path = CString::new(path.to_string_lossy().as_bytes()).map_err(|error| error.to_string())?;
-    let key = CString::new(key).map_err(|error| error.to_string())?;
-    let values = CString::new(values.join("\n")).map_err(|error| error.to_string())?;
-    let ok = unsafe {
-        lyrico_taglib_write_property(path.as_ptr(), key.as_ptr(), values.as_ptr())
-    };
-    if ok == 0 {
-        return Err("TagLib could not write this property".to_string());
+struct Buffer {
+    data: *mut u8,
+    size: usize,
+}
+impl Drop for Buffer {
+    fn drop(&mut self) {
+        unsafe { lyrico_taglib_free(self.data) }
     }
+}
+impl Buffer {
+    fn bytes(&self) -> Result<&[u8], String> {
+        if self.size > 64 * 1024 * 1024 {
+            return Err("Metadata exceeds 64 MB".into());
+        }
+        if self.size == 0 {
+            return Ok(&[]);
+        }
+        if self.data.is_null() {
+            return Err("TagLib returned an invalid buffer".into());
+        }
+        Ok(unsafe { std::slice::from_raw_parts(self.data, self.size) })
+    }
+}
+fn checked(status: i32) -> Result<(), String> {
+    if status != 0 {
+        return Ok(());
+    }
+    Err(unsafe { CStr::from_ptr(lyrico_taglib_error()) }
+        .to_string_lossy()
+        .into_owned())
+}
+fn cstring(value: &str) -> Result<CString, String> {
+    CString::new(value).map_err(|_| "Path or property key contains a NUL character".into())
+}
+impl File {
+    pub(crate) fn open(path: &Path, audio_properties: bool) -> Result<Self, String> {
+        let path = path.to_str().ok_or("Audio path is not valid Unicode")?;
+        let path = cstring(path)?;
+        let handle = unsafe { lyrico_taglib_open(path.as_ptr(), i32::from(audio_properties)) };
+        match NonNull::new(handle) {
+            Some(handle) => Ok(Self {
+                handle,
+                _thread: PhantomData,
+            }),
+            None => {
+                checked(0)?;
+                unreachable!()
+            }
+        }
+    }
+    fn buffer(
+        &self,
+        read: unsafe extern "C" fn(*mut c_void, *mut *mut u8, *mut usize) -> i32,
+    ) -> Result<Buffer, String> {
+        let mut result = Buffer {
+            data: std::ptr::null_mut(),
+            size: 0,
+        };
+        checked(unsafe { read(self.handle.as_ptr(), &mut result.data, &mut result.size) })?;
+        Ok(result)
+    }
+    pub(crate) fn properties(&self) -> Result<Properties, String> {
+        let buffer = self.buffer(lyrico_taglib_properties)?;
+        let mut reader = Reader(buffer.bytes()?);
+        let count = reader.count()?;
+        let mut properties = Properties::new();
+        for _ in 0..count {
+            let key = reader.string()?;
+            let count = reader.count()?;
+            let mut values = Vec::new();
+            for _ in 0..count {
+                values.push(reader.string()?);
+            }
+            properties.insert(key, values);
+        }
+        reader.finish()?;
+        Ok(properties)
+    }
+    pub(crate) fn audio_properties(&self) -> Result<AudioProperties, String> {
+        let mut result = AudioProperties::default();
+        checked(unsafe { lyrico_taglib_audio_properties(self.handle.as_ptr(), &mut result) })?;
+        Ok(result)
+    }
+    pub(crate) fn cover(&self) -> Result<Option<Cover>, String> {
+        let buffer = self.buffer(lyrico_taglib_cover)?;
+        let bytes = buffer.bytes()?;
+        if bytes.is_empty() {
+            return Ok(None);
+        }
+        let mut reader = Reader(bytes);
+        let mime = reader.string()?;
+        let data = reader.blob()?.to_vec();
+        reader.finish()?;
+        Ok(Some(Cover { mime, data }))
+    }
+    pub(crate) fn set_property(&mut self, key: &str, values: &[String]) -> Result<(), String> {
+        let key = cstring(key)?;
+        let mut encoded = Vec::new();
+        encode_length(&mut encoded, values.len())?;
+        for value in values {
+            encode_length(&mut encoded, value.len())?;
+            encoded.extend_from_slice(value.as_bytes());
+        }
+        checked(unsafe {
+            lyrico_taglib_set_property(
+                self.handle.as_ptr(),
+                key.as_ptr(),
+                encoded.as_ptr(),
+                encoded.len(),
+            )
+        })
+    }
+    pub(crate) fn set_cover(&mut self, cover: Option<&Cover>) -> Result<(), String> {
+        let bytes = cover.map_or(&[][..], |cover| cover.data.as_slice());
+        let mime = cstring(cover.map_or("", |cover| cover.mime.as_str()))?;
+        checked(unsafe {
+            lyrico_taglib_set_cover(
+                self.handle.as_ptr(),
+                bytes.as_ptr(),
+                bytes.len(),
+                mime.as_ptr(),
+            )
+        })
+    }
+    pub(crate) fn save(&mut self) -> Result<(), String> {
+        checked(unsafe { lyrico_taglib_save(self.handle.as_ptr()) })
+    }
+}
+fn encode_length(output: &mut Vec<u8>, length: usize) -> Result<(), String> {
+    let length = u32::try_from(length).map_err(|_| "Metadata value is too large")?;
+    output.extend_from_slice(&length.to_le_bytes());
     Ok(())
 }
-
-#[cfg(target_os = "windows")]
-pub(crate) fn read_custom_tags(path: &Path) -> Result<Vec<CustomTag>, String> {
-    let keys = list_properties(path)?;
-    let mut tags = Vec::new();
-    for key in keys.into_iter().filter(|key| !is_standard_property(key)) {
-        let values = read_property(path, &key)?;
-        if !values.is_empty() {
-            tags.push(CustomTag { key, values });
+struct Reader<'a>(&'a [u8]);
+impl<'a> Reader<'a> {
+    fn count(&mut self) -> Result<usize, String> {
+        let bytes = self.0.get(..4).ok_or("Truncated TagLib response")?;
+        let count = u32::from_le_bytes(bytes.try_into().unwrap()) as usize;
+        self.0 = &self.0[4..];
+        Ok(count)
+    }
+    fn blob(&mut self) -> Result<&'a [u8], String> {
+        let size = self.count()?;
+        let value = self.0.get(..size).ok_or("Truncated TagLib value")?;
+        self.0 = &self.0[size..];
+        Ok(value)
+    }
+    fn string(&mut self) -> Result<String, String> {
+        String::from_utf8(self.blob()?.to_vec()).map_err(|error| error.to_string())
+    }
+    fn finish(self) -> Result<(), String> {
+        if self.0.is_empty() {
+            Ok(())
+        } else {
+            Err("Trailing TagLib response data".into())
         }
-    }
-    tags.sort_by(|left, right| left.key.to_ascii_lowercase().cmp(&right.key.to_ascii_lowercase()));
-    Ok(tags)
-}
-
-#[cfg(target_os = "windows")]
-pub(crate) fn write_custom_tags(path: &Path, tags: &[CustomTag]) -> Result<(), String> {
-    let existing = read_custom_tags(path)?;
-    let desired = tags
-        .iter()
-        .map(|tag| tag.key.to_ascii_uppercase())
-        .collect::<HashSet<_>>();
-    for tag in existing {
-        if !desired.contains(&tag.key.to_ascii_uppercase()) {
-            write_property(path, &tag.key, &[])?;
-        }
-    }
-    for tag in tags {
-        let key = tag.key.trim();
-        if key.is_empty() || key.chars().any(|character| character == '\r' || character == '\n') {
-            return Err(format!("Invalid custom tag key: {key}"));
-        }
-        write_property(path, key, &tag.values)?;
-    }
-    Ok(())
-}
-
-fn is_standard_property(key: &str) -> bool {
-    matches!(
-        key.to_ascii_uppercase().as_str(),
-        "TITLE"
-            | "ARTIST"
-            | "ALBUM"
-            | "ALBUMARTIST"
-            | "GENRE"
-            | "DATE"
-            | "YEAR"
-            | "TRACKNUMBER"
-            | "DISCNUMBER"
-            | "COMPOSER"
-            | "LYRICIST"
-            | "COPYRIGHT"
-            | "COMMENT"
-            | "LANGUAGE"
-            | "LYRICS"
-            | "UNSYNCEDLYRICS"
-            | "RATING"
-            | "REPLAYGAIN_TRACK_GAIN"
-            | "REPLAYGAIN_TRACK_PEAK"
-            | "REPLAYGAIN_ALBUM_GAIN"
-            | "REPLAYGAIN_ALBUM_PEAK"
-            | "REPLAYGAIN_REFERENCE_LOUDNESS"
-            | "PICTURE"
-            | "METADATA_BLOCK_PICTURE"
-            | "COVERART"
-            | "COVERARTMIME"
-    )
-}
-
-#[cfg(not(target_os = "windows"))]
-pub(crate) fn list_properties(_path: &Path) -> Result<Vec<String>, String> {
-    Err("Custom tag support is currently available on Windows only".to_string())
-}
-
-#[cfg(not(target_os = "windows"))]
-pub(crate) fn read_property(_path: &Path, _key: &str) -> Result<Vec<String>, String> {
-    Err("Custom tag support is currently available on Windows only".to_string())
-}
-
-#[cfg(not(target_os = "windows"))]
-pub(crate) fn write_property(_path: &Path, _key: &str, _values: &[String]) -> Result<(), String> {
-    Err("Custom tag support is currently available on Windows only".to_string())
-}
-
-#[cfg(not(target_os = "windows"))]
-pub(crate) fn read_custom_tags(_path: &Path) -> Result<Vec<CustomTag>, String> {
-    Err("Custom tag support is currently available on Windows only".to_string())
-}
-
-#[cfg(not(target_os = "windows"))]
-pub(crate) fn write_custom_tags(_path: &Path, _tags: &[CustomTag]) -> Result<(), String> {
-    Err("Custom tag support is currently available on Windows only".to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{is_standard_property, read_custom_tags, write_custom_tags};
-    use crate::models::CustomTag;
-    use std::path::PathBuf;
-
-    #[test]
-    fn standard_properties_are_not_exposed_as_custom_tags() {
-        assert!(is_standard_property("TITLE"));
-        assert!(is_standard_property("replaygain_track_gain"));
-        assert!(!is_standard_property("SOURCE"));
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn custom_property_round_trips_through_taglib() {
-        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("native")
-            .join("taglib")
-            .join("taglib")
-            .join("tests")
-            .join("data")
-            .join("no-tags.flac");
-        let target = std::env::temp_dir().join(format!(
-            "lyrico-custom-tag-{}.flac",
-            std::process::id()
-        ));
-        std::fs::copy(&source, &target).expect("TagLib fixture should copy");
-        write_custom_tags(
-            &target,
-            &[CustomTag {
-                key: "SOURCE".to_string(),
-                values: vec!["Lyrico test".to_string()],
-            }],
-        )
-        .expect("custom tag should write");
-        let tags = read_custom_tags(&target).expect("custom tag should read");
-        assert_eq!(tags[0].key, "SOURCE");
-        assert_eq!(tags[0].values, vec!["Lyrico test".to_string()]);
-        let _ = std::fs::remove_file(target);
     }
 }

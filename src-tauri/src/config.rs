@@ -29,6 +29,7 @@ pub(crate) struct DesktopSettings {
     pub(crate) hidden_folder_paths: Vec<String>,
     pub(crate) artist_poster_folder: String,
     pub(crate) rename_character_mappings: BTreeMap<String, String>,
+    #[serde(alias = "theme")]
     pub(crate) theme_mode: String,
     pub(crate) edit_field_visibility: BTreeMap<String, bool>,
     pub(crate) edit_field_order: Vec<String>,
@@ -132,19 +133,15 @@ fn normalize_settings(mut settings: DesktopSettings) -> DesktopSettings {
     settings.rename_character_mappings = normalize_rename_character_mappings(std::mem::take(
         &mut settings.rename_character_mappings,
     ));
-    settings.lyric_line_order = normalize_lyric_line_order(std::mem::take(
-        &mut settings.lyric_line_order,
-    ));
-    settings.remove_tag_line_keywords = normalize_cleanup_keywords(std::mem::take(
-        &mut settings.remove_tag_line_keywords,
-    ));
-    settings.hidden_folder_paths = normalize_folder_paths(std::mem::take(
-        &mut settings.hidden_folder_paths,
-    ));
+    settings.lyric_line_order =
+        normalize_lyric_line_order(std::mem::take(&mut settings.lyric_line_order));
+    settings.remove_tag_line_keywords =
+        normalize_cleanup_keywords(std::mem::take(&mut settings.remove_tag_line_keywords));
+    settings.hidden_folder_paths =
+        normalize_folder_paths(std::mem::take(&mut settings.hidden_folder_paths));
     settings.artist_poster_folder = settings.artist_poster_folder.trim().to_string();
-    settings.edit_field_order = normalize_edit_field_order(std::mem::take(
-        &mut settings.edit_field_order,
-    ));
+    settings.edit_field_order =
+        normalize_edit_field_order(std::mem::take(&mut settings.edit_field_order));
     if !matches!(settings.theme_mode.as_str(), "system" | "light" | "dark") {
         settings.theme_mode = DesktopSettings::default().theme_mode;
     }
@@ -207,10 +204,11 @@ fn default_lyric_line_order() -> Vec<String> {
 
 fn normalize_lyric_line_order(order: Vec<String>) -> Vec<String> {
     let mut normalized = Vec::new();
-    for value in order
-        .into_iter()
-        .chain(["original", "romanization", "translation"].into_iter().map(str::to_string))
-    {
+    for value in order.into_iter().chain(
+        ["original", "romanization", "translation"]
+            .into_iter()
+            .map(str::to_string),
+    ) {
         if matches!(value.as_str(), "original" | "translation" | "romanization")
             && !normalized.iter().any(|item| item == &value)
         {
@@ -247,20 +245,33 @@ fn normalize_folder_paths(paths: Vec<String>) -> Vec<String> {
 }
 
 fn default_edit_field_order() -> Vec<String> {
-    ["basic", "track", "credits", "customTags", "replaygain", "lyrics", "cover"]
-        .into_iter()
-        .map(str::to_string)
-        .collect()
+    [
+        "basic",
+        "track",
+        "credits",
+        "customTags",
+        "replaygain",
+        "lyrics",
+        "cover",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
 }
 
 fn normalize_edit_field_order(order: Vec<String>) -> Vec<String> {
     let mut normalized = Vec::new();
-    for value in order
-        .into_iter()
-        .chain(default_edit_field_order())
-    {
-        if ["basic", "track", "credits", "customTags", "replaygain", "lyrics", "cover"]
-            .contains(&value.as_str())
+    for value in order.into_iter().chain(default_edit_field_order()) {
+        if [
+            "basic",
+            "track",
+            "credits",
+            "customTags",
+            "replaygain",
+            "lyrics",
+            "cover",
+        ]
+        .contains(&value.as_str())
             && !normalized.iter().any(|item| item == &value)
         {
             normalized.push(value);
@@ -491,10 +502,8 @@ mod tests {
     }
 
     fn temp_config_dir(label: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "lyrico-config-{}-{label}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("lyrico-config-{}-{label}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("temporary config dir should be created");
         dir

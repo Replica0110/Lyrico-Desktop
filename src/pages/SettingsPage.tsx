@@ -552,7 +552,7 @@ const OPEN_SOURCE_DEPENDENCIES = [
   { name: "rusqlite", license: "MIT" },
   { name: "symphonia", license: "MPL-2.0" },
   { name: "ebur128", license: "MIT" },
-  { name: "lofty", license: "MIT OR Apache-2.0" },
+  { name: "TagLib", license: "LGPL-2.1 OR MPL-1.1" },
   { name: "rquickjs", license: "MIT" },
   { name: "reqwest", license: "MIT OR Apache-2.0" },
   { name: "image", license: "MIT OR Apache-2.0" },

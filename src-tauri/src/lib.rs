@@ -3,12 +3,14 @@ mod batch;
 mod commands;
 mod config;
 mod database;
+mod file_mutation;
 mod lyrics;
 mod lyrics_commands;
 mod models;
 mod path_access;
 mod paths;
 mod plugins;
+mod remote_image;
 mod replay_gain;
 mod taglib_bridge;
 
@@ -22,17 +24,17 @@ use commands::{
     load_library_tracks_by_paths, load_source_plugins, load_track_covers, preview_batch_rename,
     preview_source_plugin_archive, read_audio_file, read_image_file, read_text_file,
     remove_library_folder, reorder_plugin_sources, retry_failed_batch_items,
-    save_artist_split_config, save_audio_tags, save_custom_tags, save_desktop_settings,
-    save_source_plugin_settings, scan_folder, search_lyrics_lines, set_plugin_source_enabled,
-    set_source_plugin_enabled, set_source_plugin_order, start_batch_task,
-    uninstall_source_plugin, upsert_library_folder, write_image_file, write_text_file,
+    save_artist_split_config, save_audio_tags, save_desktop_settings, save_source_plugin_settings,
+    scan_folder, search_lyrics_lines, set_plugin_source_enabled, set_source_plugin_enabled,
+    set_source_plugin_order, start_batch_task, uninstall_source_plugin, upsert_library_folder,
+    write_image_file, write_text_file,
 };
 use database::Database;
 use lyrics_commands::{
     detect_lyrics_format, extract_plain_lyrics_text, process_lyrics_text, render_plugin_lyrics,
 };
-use paths::resolve_data_paths;
 use path_access::{pick_paths, pick_save_path, PathGrants};
+use paths::resolve_data_paths;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -77,9 +79,8 @@ pub fn run() {
             scan_folder,
             pick_paths,
             pick_save_path,
-             read_audio_file,
-             load_custom_tags,
-             save_custom_tags,
+            read_audio_file,
+            load_custom_tags,
             read_image_file,
             read_text_file,
             write_text_file,
@@ -99,10 +100,10 @@ pub fn run() {
             get_storage_info,
             analyze_replay_gain,
             cancel_replay_gain,
-             create_batch_task,
-             load_batch_tasks,
-             delete_batch_tasks,
-             load_batch_task_items,
+            create_batch_task,
+            load_batch_tasks,
+            delete_batch_tasks,
+            load_batch_task_items,
             preview_batch_rename,
             start_batch_task,
             cancel_batch_task,

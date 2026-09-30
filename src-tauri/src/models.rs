@@ -203,6 +203,8 @@ pub(crate) struct LibraryFolder {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TagUpdate {
+    #[serde(default)]
+    pub(crate) custom_tags: Option<Vec<CustomTag>>,
     pub(crate) path: String,
     pub(crate) title: String,
     pub(crate) artist: String,

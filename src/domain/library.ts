@@ -57,7 +57,9 @@ export function groupAlbums(tracks: AudioTrack[]): AlbumGroup[] {
   const groups = new Map<string, AudioTrack[]>();
   for (const track of tracks) {
     const key = `${track.album || "Unknown Album"}\u0000${track.albumArtist || track.artist || "Unknown Artist"}`;
-    groups.set(key, [...(groups.get(key) ?? []), track]);
+    const group = groups.get(key);
+    if (group) group.push(track);
+    else groups.set(key, [track]);
   }
 
   return [...groups.entries()]
@@ -113,7 +115,9 @@ export function groupArtists(tracks: AudioTrack[], config: ArtistSplitConfig = d
   for (const track of tracks) {
     const rawArtist = track.artist || track.albumArtist || "Unknown Artist";
     for (const artist of splitArtists(rawArtist, config)) {
-      groups.set(artist, [...(groups.get(artist) ?? []), track]);
+      const group = groups.get(artist);
+      if (group) group.push(track);
+      else groups.set(artist, [track]);
     }
   }
 

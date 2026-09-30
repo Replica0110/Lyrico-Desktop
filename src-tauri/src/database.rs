@@ -1,5 +1,7 @@
-use crate::models::{AppLogEntry, AudioTrack, BatchTask, BatchTaskItem, LibraryFolder, LyricLineMatch};
-use rusqlite::{params, Connection, OptionalExtension, Row, Transaction, ToSql};
+use crate::models::{
+    AppLogEntry, AudioTrack, BatchTask, BatchTaskItem, LibraryFolder, LyricLineMatch,
+};
+use rusqlite::{params, Connection, OptionalExtension, Row, ToSql, Transaction};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -7,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const DATABASE_SCHEMA_VERSION: u32 = 6;
+const DATABASE_SCHEMA_VERSION: u32 = 7;
 static NEXT_BATCH_ID: AtomicU64 = AtomicU64::new(1);
 const BATCH_TASK_TYPES: &[&str] = &[
     "matchMetadata",
@@ -412,7 +414,10 @@ impl Database {
         Ok(())
     }
 
-    pub(crate) async fn load_tracks_by_paths(&self, paths: &[String]) -> Result<Vec<AudioTrack>, String> {
+    pub(crate) async fn load_tracks_by_paths(
+        &self,
+        paths: &[String],
+    ) -> Result<Vec<AudioTrack>, String> {
         if paths.is_empty() {
             return Ok(Vec::new());
         }
@@ -436,7 +441,9 @@ impl Database {
                 .iter()
                 .map(|path| path as &dyn ToSql)
                 .collect::<Vec<_>>();
-            let mut statement = connection.prepare(&sql).map_err(|error| error.to_string())?;
+            let mut statement = connection
+                .prepare(&sql)
+                .map_err(|error| error.to_string())?;
             let rows = statement
                 .query_map(parameters.as_slice(), map_audio_track)
                 .map_err(|error| error.to_string())?;
@@ -779,9 +786,21 @@ impl Database {
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
+        let folder: Option<String> = transaction
+            .query_row(
+                "SELECT folder_path FROM songs WHERE path = ?1",
+                params![path],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
         transaction
             .execute("DELETE FROM songs WHERE path = ?1", params![path])
             .map_err(|error| error.to_string())?;
+        if let Some(folder) = folder {
+            transaction.execute("UPDATE library_folders SET track_count = (SELECT COUNT(*) FROM songs WHERE folder_path = ?1) WHERE path = ?1", params![folder])
+                .map_err(|error| error.to_string())?;
+        }
         transaction.commit().map_err(|error| error.to_string())
     }
 
@@ -1044,10 +1063,7 @@ impl Database {
         let mut bindings: Vec<Box<dyn ToSql>> = Vec::new();
         let mut conditions = Vec::new();
         for token in &tokens {
-            conditions.push(format!(
-                "lyrics LIKE ?{} ESCAPE '\\'",
-                bindings.len() + 1
-            ));
+            conditions.push(format!("lyrics LIKE ?{} ESCAPE '\\'", bindings.len() + 1));
             bindings.push(Box::new(format!("%{}%", escape_like_pattern(token))));
         }
         let sql = format!(
@@ -1117,7 +1133,8 @@ impl Database {
                 })
             })
             .map_err(|error| error.to_string())?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())
     }
 
     pub(crate) async fn finish_batch_task(
@@ -1354,6 +1371,12 @@ fn migrate_schema(connection: &Connection) -> Result<(), String> {
             .execute("UPDATE songs SET cover_thumbnail_data_url = NULL", [])
             .map_err(|error| error.to_string())?;
     }
+    if previous_version > 0 && previous_version < 7 {
+        // Older scans never cached embedded lyrics. Invalidate fingerprints once.
+        connection
+            .execute("UPDATE library_folders SET scan_signature = ''", [])
+            .map_err(|error| error.to_string())?;
+    }
     connection
         .pragma_update(None, "user_version", DATABASE_SCHEMA_VERSION)
         .map_err(|error| error.to_string())
@@ -1431,7 +1454,10 @@ fn upsert_track(
         .and_then(|metadata| metadata.created().ok())
         .and_then(|created| created.duration_since(UNIX_EPOCH).ok())
         .map_or(0, |duration| duration.as_secs());
-    let added_at = track.added_at.filter(|value| *value > 0).unwrap_or_else(now);
+    let added_at = track
+        .added_at
+        .filter(|value| *value > 0)
+        .unwrap_or_else(now);
     transaction
         .execute(
             "INSERT INTO songs (
@@ -1439,10 +1465,10 @@ fn upsert_track(
                 track_number, disc_number, year, duration_seconds, format, bitrate, sample_rate,
                 channels, has_lyrics, has_cover, replay_gain_track_gain, replay_gain_track_peak,
                 replay_gain_album_gain, replay_gain_album_peak, file_size, modified_at, added_at,
-                created_at, updated_at
+                created_at, updated_at, lyrics
              ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28
+                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29
              ) ON CONFLICT(path) DO UPDATE SET
                 folder_path = excluded.folder_path, file_name = excluded.file_name,
                 title = excluded.title, artist = excluded.artist, album = excluded.album,
@@ -1451,7 +1477,7 @@ fn upsert_track(
                 year = excluded.year, duration_seconds = excluded.duration_seconds,
                 format = excluded.format, bitrate = excluded.bitrate,
                 sample_rate = excluded.sample_rate, channels = excluded.channels,
-                has_lyrics = excluded.has_lyrics, has_cover = excluded.has_cover,
+                has_lyrics = excluded.has_lyrics, has_cover = excluded.has_cover, lyrics = excluded.lyrics,
                 replay_gain_track_gain = excluded.replay_gain_track_gain,
                 replay_gain_track_peak = excluded.replay_gain_track_peak,
                 replay_gain_album_gain = excluded.replay_gain_album_gain,
@@ -1489,7 +1515,8 @@ fn upsert_track(
                 as_i64(modified_at),
                 as_i64(added_at),
                 as_i64(created_at),
-                as_i64(now())
+                as_i64(now()),
+                track.lyrics
             ],
         )
         .map_err(|error| error.to_string())?;
@@ -1580,10 +1607,7 @@ fn first_matching_lyric_line(lyrics: &str, tokens: &[String]) -> Option<String> 
             continue;
         }
         let haystack = trimmed.to_lowercase();
-        if tokens
-            .iter()
-            .all(|token| haystack.contains(token.as_str()))
-        {
+        if tokens.iter().all(|token| haystack.contains(token.as_str())) {
             return Some(trimmed.to_string());
         }
     }
@@ -2181,7 +2205,10 @@ mod tests {
                 .await
                 .expect("finished task deletion should succeed");
 
-            let tasks = database.load_batch_tasks().await.expect("tasks should load");
+            let tasks = database
+                .load_batch_tasks()
+                .await
+                .expect("tasks should load");
             assert_eq!(tasks.len(), 1);
             assert_eq!(tasks[0].task_id, active.task_id);
         });
@@ -2247,10 +2274,9 @@ mod tests {
                 .persist_folder_scan("C:\\Music", "test", &[first.clone(), second])
                 .await
                 .expect("folder scan should persist");
-            let artist_before = collection_ids(&database, "SELECT id FROM artists ORDER BY id")
-                .await;
-            let album_before = collection_ids(&database, "SELECT id FROM albums ORDER BY id")
-                .await;
+            let artist_before =
+                collection_ids(&database, "SELECT id FROM artists ORDER BY id").await;
+            let album_before = collection_ids(&database, "SELECT id FROM albums ORDER BY id").await;
 
             let mut updated = first.clone();
             updated.title = "Updated title".to_string();
@@ -2268,7 +2294,14 @@ mod tests {
                 album_before
             );
             let tracks = database.load_tracks_blocking().expect("tracks should load");
-            assert_eq!(tracks.iter().find(|track| track.path == first.path).unwrap().title, "Updated title");
+            assert_eq!(
+                tracks
+                    .iter()
+                    .find(|track| track.path == first.path)
+                    .unwrap()
+                    .title,
+                "Updated title"
+            );
         });
     }
 
@@ -2291,7 +2324,9 @@ mod tests {
                 .expect("repeat scan should persist");
 
             assert_eq!(song_updated_at(&database, &kept.path).await, updated_before);
-            assert!(song_updated_at(&database, "C:\\Music\\removed.flac").await.is_none());
+            assert!(song_updated_at(&database, "C:\\Music\\removed.flac")
+                .await
+                .is_none());
             let tracks = database.load_tracks_blocking().expect("tracks should load");
             assert_eq!(tracks.len(), 1);
         });
@@ -2422,13 +2457,19 @@ mod tests {
             Some("[00:01.00] Hello World")
         );
 
-        let tokens: Vec<String> = ["take", "me"].iter().map(|token| token.to_string()).collect();
+        let tokens: Vec<String> = ["take", "me"]
+            .iter()
+            .map(|token| token.to_string())
+            .collect();
         assert_eq!(
             first_matching_lyric_line(lyrics, &tokens).as_deref(),
             Some("Take on me")
         );
 
-        let tokens: Vec<String> = ["take", "zzz"].iter().map(|token| token.to_string()).collect();
+        let tokens: Vec<String> = ["take", "zzz"]
+            .iter()
+            .map(|token| token.to_string())
+            .collect();
         assert_eq!(first_matching_lyric_line(lyrics, &tokens), None);
         assert_eq!(escape_like_pattern("100%_a\\b"), "100\\%\\_a\\\\b");
     }
