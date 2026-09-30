@@ -40,6 +40,7 @@ pub(super) trait BatchProcessor: Send + Sync {
 pub(super) fn processor_for(task_type: &str) -> Result<Box<dyn BatchProcessor>, String> {
     match task_type {
         "editTags" => Ok(Box::new(super::edit::EditTagsProcessor)),
+        "deleteFiles" => Ok(Box::new(super::delete::DeleteFilesProcessor)),
         "matchMetadata" => Ok(Box::new(super::metadata::MatchMetadataProcessor)),
         "formatLyrics" => Ok(Box::new(super::lyrics::LyricsFormatProcessor)),
         "renameFiles" => Ok(Box::new(super::rename::RenameFilesProcessor)),
@@ -74,18 +75,10 @@ impl BatchProcessor for ReplayGainProcessor {
             ));
         }
 
+        let target_loudness = crate::config::load_desktop_settings(&context.app)
+            .map_err(ProcessError::Failed)?
+            .replay_gain_target_loudness;
         let job_id = format!("{}:{}", context.task.task_id, context.item.item_id);
-        let target_loudness = context
-            .task
-            .config_json
-            .as_deref()
-            .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
-            .and_then(|config| {
-                config
-                    .get("targetLoudness")
-                    .and_then(serde_json::Value::as_f64)
-            })
-            .unwrap_or(crate::replay_gain::DEFAULT_TARGET_LOUDNESS_LUFS);
         let analysis = analyze_track(
             job_id.clone(),
             path,

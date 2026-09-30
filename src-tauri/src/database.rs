@@ -1,5 +1,5 @@
-use crate::models::{AudioTrack, BatchTask, BatchTaskItem, LibraryFolder};
-use rusqlite::{params, Connection, OptionalExtension, Row, Transaction};
+use crate::models::{AppLogEntry, AudioTrack, BatchTask, BatchTaskItem, LibraryFolder, LyricLineMatch};
+use rusqlite::{params, Connection, OptionalExtension, Row, Transaction, ToSql};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const DATABASE_SCHEMA_VERSION: u32 = 5;
+const DATABASE_SCHEMA_VERSION: u32 = 6;
 static NEXT_BATCH_ID: AtomicU64 = AtomicU64::new(1);
 const BATCH_TASK_TYPES: &[&str] = &[
     "matchMetadata",
@@ -17,6 +17,7 @@ const BATCH_TASK_TYPES: &[&str] = &[
     "exportLyrics",
     "exportCover",
     "replayGain",
+    "deleteFiles",
 ];
 
 #[derive(Clone)]
@@ -260,6 +261,44 @@ impl Database {
         transaction.commit().map_err(|error| error.to_string())
     }
 
+    pub(crate) async fn set_plugin_order(&self, plugin_ids: &[String]) -> Result<(), String> {
+        let mut connection = self.lock()?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        for (sort_order, plugin_id) in plugin_ids.iter().enumerate() {
+            let changed = transaction
+                .execute(
+                    "UPDATE source_plugins SET sort_order = ?2, updated_at = ?3 WHERE id = ?1",
+                    params![plugin_id, sort_order as i32, now().to_string()],
+                )
+                .map_err(|error| error.to_string())?;
+            if changed != 1 {
+                return Err(format!("Plugin was not found: {plugin_id}"));
+            }
+        }
+        transaction.commit().map_err(|error| error.to_string())
+    }
+
+    pub(crate) async fn set_plugin_enabled(
+        &self,
+        plugin_id: &str,
+        enabled: bool,
+    ) -> Result<(), String> {
+        let connection = self.lock()?;
+        let changed = connection
+            .execute(
+                "UPDATE source_plugins SET enabled = ?2, updated_at = ?3 WHERE id = ?1",
+                params![plugin_id, i64::from(enabled), now().to_string()],
+            )
+            .map_err(|error| error.to_string())?;
+        if changed == 1 {
+            Ok(())
+        } else {
+            Err("Plugin was not found".to_string())
+        }
+    }
+
     pub(crate) async fn save_plugin_settings(
         &self,
         plugin_id: &str,
@@ -298,7 +337,8 @@ impl Database {
                         track_number, disc_number, year, duration_seconds, format, bitrate,
                         sample_rate, channels, has_lyrics, has_cover,
                         replay_gain_track_gain, replay_gain_track_peak,
-                        replay_gain_album_gain, replay_gain_album_peak
+                        replay_gain_album_gain, replay_gain_album_peak,
+                        modified_at, added_at, created_at
                  FROM songs
                  ORDER BY album COLLATE NOCASE, disc_number, track_number, title COLLATE NOCASE",
             )
@@ -372,6 +412,41 @@ impl Database {
         Ok(())
     }
 
+    pub(crate) async fn load_tracks_by_paths(&self, paths: &[String]) -> Result<Vec<AudioTrack>, String> {
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+        let connection = self.lock()?;
+        let mut tracks = Vec::with_capacity(paths.len());
+        for chunk in paths.chunks(400) {
+            let placeholders = (1..=chunk.len())
+                .map(|index| format!("?{index}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT path, file_name, title, artist, album, album_artist, genre,
+                        track_number, disc_number, year, duration_seconds, format, bitrate,
+                        sample_rate, channels, has_lyrics, has_cover,
+                        replay_gain_track_gain, replay_gain_track_peak,
+                        replay_gain_album_gain, replay_gain_album_peak,
+                        modified_at, added_at, created_at
+                 FROM songs WHERE path IN ({placeholders})"
+            );
+            let parameters = chunk
+                .iter()
+                .map(|path| path as &dyn ToSql)
+                .collect::<Vec<_>>();
+            let mut statement = connection.prepare(&sql).map_err(|error| error.to_string())?;
+            let rows = statement
+                .query_map(parameters.as_slice(), map_audio_track)
+                .map_err(|error| error.to_string())?;
+            for row in rows {
+                tracks.push(row.map_err(|error| error.to_string())?);
+            }
+        }
+        Ok(tracks)
+    }
+
     pub(crate) async fn load_folder_index(
         &self,
         folder_path: &str,
@@ -395,7 +470,8 @@ impl Database {
                         track_number, disc_number, year, duration_seconds, format, bitrate,
                         sample_rate, channels, has_lyrics, has_cover,
                         replay_gain_track_gain, replay_gain_track_peak,
-                        replay_gain_album_gain, replay_gain_album_peak, file_size, modified_at
+                        replay_gain_album_gain, replay_gain_album_peak,
+                        modified_at, added_at, created_at, file_size, modified_at
                  FROM songs WHERE folder_path = ?1",
             )
             .map_err(|error| error.to_string())?;
@@ -403,10 +479,10 @@ impl Database {
             .query_map(params![folder_path], |row| {
                 let track = map_audio_track(row)?;
                 let file_size = row
-                    .get::<_, i64>(21)
+                    .get::<_, i64>(24)
                     .map(|value| u64::try_from(value).unwrap_or_default())?;
                 let modified_at = row
-                    .get::<_, i64>(22)
+                    .get::<_, i64>(25)
                     .map(|value| u64::try_from(value).unwrap_or_default())?;
                 Ok(IndexedTrack {
                     track,
@@ -433,6 +509,14 @@ impl Database {
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
+        let previous_signature = transaction
+            .query_row(
+                "SELECT scan_signature FROM library_folders WHERE path = ?1",
+                params![folder_path],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
         let scanned_at = now().to_string();
         transaction
             .execute(
@@ -446,16 +530,30 @@ impl Database {
                 params![folder_path, tracks.len() as u32, scanned_at, scan_signature],
             )
             .map_err(|error| error.to_string())?;
-        transaction
-            .execute(
-                "DELETE FROM songs WHERE folder_path = ?1",
-                params![folder_path],
-            )
-            .map_err(|error| error.to_string())?;
+        let existing = load_folder_song_fingerprints(&transaction, folder_path)?;
+        let mut seen = std::collections::HashSet::with_capacity(tracks.len());
         for track in tracks {
+            seen.insert(track.path.clone());
+            if previous_signature.as_deref() == Some(scan_signature) {
+                if let Some((file_size, modified_at)) = existing.get(&track.path) {
+                    let metadata = fs::metadata(&track.path).ok();
+                    let current_size = metadata.as_ref().map_or(0, fs::Metadata::len);
+                    let current_modified = metadata
+                        .and_then(|metadata| metadata.modified().ok())
+                        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+                        .map_or(0, |duration| duration.as_secs());
+                    if *file_size == current_size && *modified_at == current_modified {
+                        continue;
+                    }
+                }
+            }
             upsert_track(&transaction, folder_path, track)?;
         }
-        rebuild_collections(&transaction)?;
+        for path in existing.keys().filter(|path| !seen.contains(path.as_str())) {
+            transaction
+                .execute("DELETE FROM songs WHERE path = ?1", params![path])
+                .map_err(|error| error.to_string())?;
+        }
         transaction.commit().map_err(|error| error.to_string())
     }
 
@@ -474,7 +572,6 @@ impl Database {
             .map_err(|error| error.to_string())?;
         if let Some(folder_path) = folder_path {
             upsert_track(&transaction, &folder_path, track)?;
-            rebuild_collections(&transaction)?;
         }
         transaction.commit().map_err(|error| error.to_string())
     }
@@ -488,11 +585,11 @@ impl Database {
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
-        let folder_path = transaction
+        let (folder_path, previous_added_at) = transaction
             .query_row(
-                "SELECT folder_path FROM songs WHERE path = ?1",
+                "SELECT folder_path, added_at FROM songs WHERE path = ?1",
                 params![previous_path],
-                |row| row.get::<_, String>(0),
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
             )
             .optional()
             .map_err(|error| error.to_string())?
@@ -501,8 +598,65 @@ impl Database {
             .execute("DELETE FROM songs WHERE path = ?1", params![previous_path])
             .map_err(|error| error.to_string())?;
         upsert_track(&transaction, &folder_path, track)?;
-        rebuild_collections(&transaction)?;
+        if previous_added_at > 0 {
+            transaction
+                .execute(
+                    "UPDATE songs SET added_at = ?2 WHERE path = ?1",
+                    params![track.path, previous_added_at],
+                )
+                .map_err(|error| error.to_string())?;
+        }
         transaction.commit().map_err(|error| error.to_string())
+    }
+
+    pub(crate) async fn load_track_timestamps(
+        &self,
+        path: &str,
+    ) -> Result<(Option<u64>, Option<u64>), String> {
+        let connection = self.lock()?;
+        connection
+            .query_row(
+                "SELECT modified_at, added_at FROM songs WHERE path = ?1",
+                params![path],
+                |row| {
+                    let modified_at: i64 = row.get(0)?;
+                    let added_at: i64 = row.get(1)?;
+                    Ok((stored_time(modified_at), stored_time(added_at)))
+                },
+            )
+            .optional()
+            .map_err(|error| error.to_string())
+            .map(|value| value.unwrap_or((None, None)))
+    }
+
+    pub(crate) async fn load_track_times_by_paths(
+        &self,
+        paths: &[String],
+    ) -> Result<HashMap<String, (Option<u64>, Option<u64>)>, String> {
+        if paths.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let connection = self.lock()?;
+        let placeholders = paths.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let mut statement = connection
+            .prepare(&format!(
+                "SELECT path, added_at, modified_at FROM songs WHERE path IN ({placeholders})"
+            ))
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(rusqlite::params_from_iter(paths.iter()), |row| {
+                let path: String = row.get(0)?;
+                let added_at: i64 = row.get(1)?;
+                let modified_at: i64 = row.get(2)?;
+                Ok((path, stored_time(added_at), stored_time(modified_at)))
+            })
+            .map_err(|error| error.to_string())?;
+        let mut result = HashMap::new();
+        for row in rows {
+            let (path, added_at, modified_at) = row.map_err(|error| error.to_string())?;
+            result.insert(path, (added_at, modified_at));
+        }
+        Ok(result)
     }
 
     pub(crate) async fn create_batch_task(
@@ -521,17 +675,7 @@ impl Database {
             serde_json::from_str::<serde_json::Value>(config)
                 .map_err(|error| format!("Invalid batch task configuration: {error}"))?;
         }
-        let mut unique_paths = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-        for path in song_paths
-            .iter()
-            .map(|path| path.trim())
-            .filter(|path| !path.is_empty())
-        {
-            if seen.insert(path.to_string()) {
-                unique_paths.push(path.to_string());
-            }
-        }
+        let unique_paths = deduplicate_song_paths(song_paths);
         if unique_paths.is_empty() {
             return Err("At least one song is required".to_string());
         }
@@ -628,6 +772,37 @@ impl Database {
             .map_err(|error| error.to_string())?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|error| error.to_string())
+    }
+
+    pub(crate) async fn remove_library_track(&self, path: &str) -> Result<(), String> {
+        let mut connection = self.lock()?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute("DELETE FROM songs WHERE path = ?1", params![path])
+            .map_err(|error| error.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())
+    }
+
+    pub(crate) async fn delete_batch_tasks(&self, task_ids: &[String]) -> Result<(), String> {
+        if task_ids.is_empty() {
+            return Ok(());
+        }
+        let mut connection = self.lock()?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        for task_id in task_ids {
+            transaction
+                .execute(
+                    "DELETE FROM batch_tasks
+                     WHERE task_id = ?1 AND status NOT IN ('queued', 'running')",
+                    params![task_id],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        transaction.commit().map_err(|error| error.to_string())
     }
 
     pub(crate) async fn load_batch_task(&self, task_id: &str) -> Result<BatchTask, String> {
@@ -851,6 +1026,100 @@ impl Database {
         Ok(())
     }
 
+    pub(crate) async fn search_lyrics_lines(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> Result<Vec<LyricLineMatch>, String> {
+        let tokens: Vec<String> = query
+            .split_whitespace()
+            .map(|token| token.to_lowercase())
+            .filter(|token| !token.is_empty())
+            .take(8)
+            .collect();
+        if tokens.is_empty() {
+            return Ok(Vec::new());
+        }
+        let connection = self.lock()?;
+        let mut bindings: Vec<Box<dyn ToSql>> = Vec::new();
+        let mut conditions = Vec::new();
+        for token in &tokens {
+            conditions.push(format!(
+                "lyrics LIKE ?{} ESCAPE '\\'",
+                bindings.len() + 1
+            ));
+            bindings.push(Box::new(format!("%{}%", escape_like_pattern(token))));
+        }
+        let sql = format!(
+            "SELECT path, title, artist, lyrics FROM songs
+             WHERE has_lyrics = 1 AND {}
+             ORDER BY album COLLATE NOCASE, disc_number, track_number, title COLLATE NOCASE
+             LIMIT ?{}",
+            conditions.join(" AND "),
+            bindings.len() + 1
+        );
+        bindings.push(Box::new(limit.clamp(1, 200)));
+        let parameters: Vec<&dyn ToSql> = bindings.iter().map(Box::as_ref).collect();
+        let mut statement = connection
+            .prepare(&sql)
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(parameters.as_slice(), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .map_err(|error| error.to_string())?;
+        let mut matches = Vec::new();
+        for row in rows {
+            let (path, title, artist, lyrics) = row.map_err(|error| error.to_string())?;
+            if let Some(matched_line) = first_matching_lyric_line(&lyrics, &tokens) {
+                matches.push(LyricLineMatch {
+                    path,
+                    title,
+                    artist,
+                    matched_line,
+                });
+            }
+        }
+        Ok(matches)
+    }
+
+    pub(crate) async fn load_app_logs(
+        &self,
+        level: Option<String>,
+        limit: u32,
+    ) -> Result<Vec<AppLogEntry>, String> {
+        let connection = self.lock()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT id, created_at, level, type, tag, message, detail, related_id
+                 FROM app_logs
+                 WHERE (?1 IS NULL OR level = ?1)
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT ?2",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(params![level, limit.clamp(1, 500)], |row| {
+                Ok(AppLogEntry {
+                    id: row.get(0)?,
+                    created_at: row.get(1)?,
+                    level: row.get(2)?,
+                    log_type: row.get(3)?,
+                    tag: row.get(4)?,
+                    message: row.get(5)?,
+                    detail: row.get(6)?,
+                    related_id: row.get(7)?,
+                })
+            })
+            .map_err(|error| error.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+    }
+
     pub(crate) async fn finish_batch_task(
         &self,
         task_id: &str,
@@ -910,7 +1179,6 @@ impl Database {
         transaction
             .execute("DELETE FROM library_folders WHERE path = ?1", params![path])
             .map_err(|error| error.to_string())?;
-        rebuild_collections(&transaction)?;
         transaction.commit().map_err(|error| error.to_string())
     }
 
@@ -943,6 +1211,30 @@ fn configure_connection(connection: &Connection) -> Result<(), String> {
              PRAGMA temp_store = MEMORY;",
         )
         .map_err(|error| error.to_string())
+}
+
+fn deduplicate_song_paths(song_paths: &[String]) -> Vec<String> {
+    let mut unique_paths = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for path in song_paths
+        .iter()
+        .map(|path| path.trim())
+        .filter(|path| !path.is_empty())
+    {
+        if seen.insert(batch_path_key(path)) {
+            unique_paths.push(path.to_string());
+        }
+    }
+    unique_paths
+}
+
+fn batch_path_key(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    if cfg!(windows) {
+        normalized.to_lowercase()
+    } else {
+        normalized.to_string()
+    }
 }
 
 fn map_batch_task(row: &Row<'_>) -> rusqlite::Result<BatchTask> {
@@ -1036,6 +1328,20 @@ fn migrate_schema(connection: &Connection) -> Result<(), String> {
         "modified_at",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
+    if !column_exists(connection, "songs", "added_at")? {
+        connection
+            .execute_batch(
+                "ALTER TABLE songs ADD COLUMN added_at INTEGER NOT NULL DEFAULT 0;
+                 UPDATE songs SET added_at = CAST(updated_at AS INTEGER) WHERE added_at = 0;",
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    if !column_exists(connection, "songs", "created_at")? {
+        connection
+            .execute_batch("ALTER TABLE songs ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;")
+            .map_err(|error| error.to_string())?;
+        backfill_created_at(connection)?;
+    }
     add_column_if_missing(connection, "songs", "cover_artwork_data_url", "TEXT")?;
     add_column_if_missing(
         connection,
@@ -1081,6 +1387,34 @@ fn add_column_if_missing(
     Ok(())
 }
 
+fn backfill_created_at(connection: &Connection) -> Result<(), String> {
+    let mut statement = connection
+        .prepare("SELECT path FROM songs WHERE created_at = 0")
+        .map_err(|error| error.to_string())?;
+    let paths = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    for path in paths {
+        let created_at = fs::metadata(&path)
+            .ok()
+            .and_then(|metadata| metadata.created().ok())
+            .and_then(|created| created.duration_since(UNIX_EPOCH).ok())
+            .map_or(0, |duration| duration.as_secs());
+        if created_at == 0 {
+            continue;
+        }
+        connection
+            .execute(
+                "UPDATE songs SET created_at = ?2 WHERE path = ?1",
+                params![path, as_i64(created_at)],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 fn upsert_track(
     transaction: &Transaction<'_>,
     folder_path: &str,
@@ -1089,19 +1423,26 @@ fn upsert_track(
     let metadata = fs::metadata(&track.path).ok();
     let file_size = metadata.as_ref().map_or(0, fs::Metadata::len);
     let modified_at = metadata
+        .as_ref()
         .and_then(|metadata| metadata.modified().ok())
         .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
         .map_or(0, |duration| duration.as_secs());
+    let created_at = metadata
+        .and_then(|metadata| metadata.created().ok())
+        .and_then(|created| created.duration_since(UNIX_EPOCH).ok())
+        .map_or(0, |duration| duration.as_secs());
+    let added_at = track.added_at.filter(|value| *value > 0).unwrap_or_else(now);
     transaction
         .execute(
             "INSERT INTO songs (
                 id, path, folder_path, file_name, title, artist, album, album_artist, genre,
                 track_number, disc_number, year, duration_seconds, format, bitrate, sample_rate,
                 channels, has_lyrics, has_cover, replay_gain_track_gain, replay_gain_track_peak,
-                replay_gain_album_gain, replay_gain_album_peak, file_size, modified_at, updated_at
+                replay_gain_album_gain, replay_gain_album_peak, file_size, modified_at, added_at,
+                created_at, updated_at
              ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26
+                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28
              ) ON CONFLICT(path) DO UPDATE SET
                 folder_path = excluded.folder_path, file_name = excluded.file_name,
                 title = excluded.title, artist = excluded.artist, album = excluded.album,
@@ -1117,6 +1458,8 @@ fn upsert_track(
                 replay_gain_album_peak = excluded.replay_gain_album_peak,
                 cover_thumbnail_data_url = NULL, cover_artwork_data_url = NULL,
                 file_size = excluded.file_size, modified_at = excluded.modified_at,
+                added_at = CASE WHEN added_at = 0 THEN excluded.added_at ELSE added_at END,
+                created_at = CASE WHEN excluded.created_at > 0 THEN excluded.created_at ELSE created_at END,
                 updated_at = excluded.updated_at",
             params![
                 track.path,
@@ -1144,6 +1487,8 @@ fn upsert_track(
                 track.replay_gain_album_peak,
                 as_i64(file_size),
                 as_i64(modified_at),
+                as_i64(added_at),
+                as_i64(created_at),
                 as_i64(now())
             ],
         )
@@ -1151,32 +1496,28 @@ fn upsert_track(
     Ok(())
 }
 
-fn rebuild_collections(transaction: &Transaction<'_>) -> Result<(), String> {
-    transaction
-        .execute_batch(
-            "DELETE FROM artist_song;
-             DELETE FROM artists;
-             DELETE FROM album_song;
-             DELETE FROM albums;
-             INSERT INTO artists (name, normalized_name, song_count, album_count, cover_song_path, updated_at)
-             SELECT artist, lower(trim(artist)), count(*), count(DISTINCT album),
-                    min(CASE WHEN has_cover = 1 THEN path END), strftime('%s','now')
-             FROM songs WHERE trim(artist) <> '' GROUP BY lower(trim(artist));
-             INSERT INTO artist_song (artist_id, song_path)
-             SELECT artists.id, songs.path FROM artists
-             JOIN songs ON lower(trim(songs.artist)) = artists.normalized_name;
-             INSERT INTO albums (name, album_artist, normalized_key, song_count, year, cover_song_path, updated_at)
-             SELECT album, album_artist,
-                    lower(trim(album)) || char(0) || lower(trim(CASE WHEN album_artist <> '' THEN album_artist ELSE artist END)),
-                    count(*), min(NULLIF(year, '')), min(CASE WHEN has_cover = 1 THEN path END), strftime('%s','now')
-             FROM songs WHERE trim(album) <> ''
-             GROUP BY lower(trim(album)), lower(trim(CASE WHEN album_artist <> '' THEN album_artist ELSE artist END));
-             INSERT INTO album_song (album_id, song_path)
-             SELECT albums.id, songs.path FROM albums JOIN songs
-             ON albums.normalized_key = lower(trim(songs.album)) || char(0) ||
-                lower(trim(CASE WHEN songs.album_artist <> '' THEN songs.album_artist ELSE songs.artist END));",
-        )
-        .map_err(|error| error.to_string())
+fn load_folder_song_fingerprints(
+    transaction: &Transaction<'_>,
+    folder_path: &str,
+) -> Result<HashMap<String, (u64, u64)>, String> {
+    let mut statement = transaction
+        .prepare("SELECT path, file_size, modified_at FROM songs WHERE folder_path = ?1")
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![folder_path], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                u64::try_from(row.get::<_, i64>(1)?).unwrap_or_default(),
+                u64::try_from(row.get::<_, i64>(2)?).unwrap_or_default(),
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    let mut fingerprints = HashMap::new();
+    for row in rows {
+        let (path, file_size, modified_at) = row.map_err(|error| error.to_string())?;
+        fingerprints.insert(path, (file_size, modified_at));
+    }
+    Ok(fingerprints)
 }
 
 fn map_audio_track(row: &Row<'_>) -> rusqlite::Result<AudioTrack> {
@@ -1215,7 +1556,38 @@ fn map_audio_track(row: &Row<'_>) -> rusqlite::Result<AudioTrack> {
         replay_gain_album_gain: row.get(19)?,
         replay_gain_album_peak: row.get(20)?,
         replay_gain_reference_loudness: String::new(),
+        modified_at: stored_time(row.get(21)?),
+        added_at: stored_time(row.get(22)?),
+        created_at: stored_time(row.get(23)?),
     })
+}
+
+fn stored_time(value: i64) -> Option<u64> {
+    (value > 0).then(|| u64::try_from(value).unwrap_or_default())
+}
+
+fn escape_like_pattern(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
+fn first_matching_lyric_line(lyrics: &str, tokens: &[String]) -> Option<String> {
+    for line in lyrics.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let haystack = trimmed.to_lowercase();
+        if tokens
+            .iter()
+            .all(|token| haystack.contains(token.as_str()))
+        {
+            return Some(trimmed.to_string());
+        }
+    }
+    None
 }
 
 fn now() -> u64 {
@@ -1274,6 +1646,8 @@ CREATE TABLE IF NOT EXISTS songs (
     replay_gain_track_gain TEXT NOT NULL DEFAULT '', replay_gain_track_peak TEXT NOT NULL DEFAULT '',
     replay_gain_album_gain TEXT NOT NULL DEFAULT '', replay_gain_album_peak TEXT NOT NULL DEFAULT '',
     file_size INTEGER NOT NULL DEFAULT 0, modified_at INTEGER NOT NULL DEFAULT 0,
+    added_at INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL DEFAULT '',
     FOREIGN KEY(folder_path) REFERENCES library_folders(path) ON DELETE CASCADE
 );
@@ -1351,6 +1725,27 @@ CREATE TABLE IF NOT EXISTS settings (
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn batch_song_paths_are_deduplicated_by_normalized_key() {
+        let paths = vec![
+            "C:\\Music\\Song.mp3".to_string(),
+            "c:\\music\\SONG.MP3".to_string(),
+            "C:/Music/Song.mp3".to_string(),
+            "  C:\\Music\\Song.mp3  ".to_string(),
+            String::new(),
+            "   ".to_string(),
+            "D:\\Music\\Other.mp3".to_string(),
+        ];
+
+        let unique = deduplicate_song_paths(&paths);
+
+        let expected_count = if cfg!(windows) { 2 } else { 3 };
+        assert_eq!(unique.len(), expected_count);
+        assert_eq!(unique[0], "C:\\Music\\Song.mp3");
+        assert_eq!(unique[unique.len() - 1], "D:\\Music\\Other.mp3");
+        assert!(unique.iter().all(|path| !path.trim().is_empty()));
+    }
 
     #[test]
     fn schema_and_basic_repository_round_trip() {
@@ -1449,6 +1844,149 @@ mod tests {
             )
             .unwrap();
         assert_eq!(values, (1, 1, 1, 7, 7, 7));
+    }
+
+    #[test]
+    fn added_at_backfills_from_updated_at_for_legacy_songs() {
+        let connection = Connection::open_in_memory().unwrap();
+        configure_connection(&connection).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE songs (
+                    id TEXT NOT NULL, path TEXT PRIMARY KEY NOT NULL,
+                    folder_path TEXT NOT NULL, file_name TEXT NOT NULL,
+                    title TEXT NOT NULL DEFAULT '', artist TEXT NOT NULL DEFAULT '',
+                    album TEXT NOT NULL DEFAULT '', track_number INTEGER,
+                    disc_number INTEGER, file_size INTEGER NOT NULL DEFAULT 0,
+                    modified_at INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL DEFAULT ''
+                 );
+                 INSERT INTO songs (id, path, folder_path, file_name, updated_at)
+                 VALUES ('a', 'C:\\Music\\a.flac', 'C:\\Music', 'a.flac', '1700000000');
+                 INSERT INTO songs (id, path, folder_path, file_name, updated_at)
+                 VALUES ('b', 'C:\\Music\\b.flac', 'C:\\Music', 'b.flac', '');",
+            )
+            .unwrap();
+
+        migrate_schema(&connection).unwrap();
+
+        let added_times: Vec<(String, i64)> = connection
+            .prepare("SELECT path, added_at FROM songs ORDER BY path")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            added_times,
+            vec![
+                ("C:\\Music\\a.flac".to_string(), 1_700_000_000),
+                ("C:\\Music\\b.flac".to_string(), 0),
+            ]
+        );
+
+        migrate_schema(&connection).unwrap();
+        let version: u32 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, DATABASE_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn created_at_backfills_from_filesystem_for_legacy_songs() {
+        let connection = Connection::open_in_memory().unwrap();
+        configure_connection(&connection).unwrap();
+        let file_path = std::env::temp_dir().join("lyrico_created_at_backfill.flac");
+        std::fs::write(&file_path, b"placeholder").expect("temporary file should be written");
+        let expected = file_path
+            .metadata()
+            .expect("temporary metadata should exist")
+            .created()
+            .expect("created time should exist")
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("created time should be valid")
+            .as_secs();
+        let path_text = file_path.to_string_lossy().to_string();
+        connection
+            .execute_batch(&format!(
+                "CREATE TABLE songs (
+                    id TEXT NOT NULL, path TEXT PRIMARY KEY NOT NULL,
+                    folder_path TEXT NOT NULL, file_name TEXT NOT NULL,
+                    title TEXT NOT NULL DEFAULT '', artist TEXT NOT NULL DEFAULT '',
+                    album TEXT NOT NULL DEFAULT '', track_number INTEGER,
+                    disc_number INTEGER, file_size INTEGER NOT NULL DEFAULT 0,
+                    modified_at INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL DEFAULT ''
+                 );
+                 INSERT INTO songs (id, path, folder_path, file_name, updated_at)
+                 VALUES ('a', '{path_text}', 'C:\\\\Music', 'a.flac', '1700000000');"
+            ))
+            .unwrap();
+
+        migrate_schema(&connection).unwrap();
+
+        let created_at: i64 = connection
+            .query_row("SELECT created_at FROM songs", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(created_at as u64, expected);
+
+        let column: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('songs') WHERE name = 'created_at'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(column, 1);
+
+        let _ = std::fs::remove_file(file_path);
+    }
+
+    #[test]
+    fn added_at_survives_rescans_and_summary_updates() {
+        tauri::async_runtime::block_on(async {
+            let database = Database::in_memory().await.expect("database should open");
+            let track = sample_track("C:\\Music\\kept.flac", "kept.flac");
+            database
+                .persist_folder_scan("C:\\Music", "test", std::slice::from_ref(&track))
+                .await
+                .expect("initial scan should persist");
+            let (_, added_at) = database
+                .load_track_timestamps(&track.path)
+                .await
+                .expect("timestamps should load");
+            assert!(added_at.is_some());
+
+            let mut rescan = track.clone();
+            rescan.added_at = None;
+            database
+                .persist_folder_scan("C:\\Music", "test", std::slice::from_ref(&rescan))
+                .await
+                .expect("rescan should persist");
+
+            let mut edited = track.clone();
+            edited.added_at = None;
+            edited.title = "Edited title".to_string();
+            database
+                .update_track_summary(&edited)
+                .await
+                .expect("summary should update");
+
+            let (modified_at, added_after) = database
+                .load_track_timestamps(&track.path)
+                .await
+                .expect("timestamps should reload");
+            assert_eq!(added_after, added_at);
+            assert_eq!(modified_at, None);
+
+            let tracks = database.load_tracks_blocking().expect("tracks should load");
+            let stored = tracks
+                .iter()
+                .find(|item| item.path == track.path)
+                .expect("track should exist");
+            assert_eq!(stored.added_at, added_at);
+            assert_eq!(stored.title, "Edited title");
+        });
     }
 
     #[test]
@@ -1591,6 +2129,65 @@ mod tests {
     }
 
     #[test]
+    fn plugin_order_can_be_reordered_and_is_persisted() {
+        tauri::async_runtime::block_on(async {
+            let database = Database::in_memory().await.expect("database should open");
+            database
+                .upsert_plugin_record("plugin.a", "{}", "{}")
+                .await
+                .expect("first plugin should save");
+            database
+                .upsert_plugin_record("plugin.b", "{}", "{}")
+                .await
+                .expect("second plugin should save");
+
+            database
+                .set_plugin_order(&["plugin.b".to_string(), "plugin.a".to_string()])
+                .await
+                .expect("plugin order should save");
+
+            let records = database
+                .load_plugin_records()
+                .await
+                .expect("plugin records should load");
+            assert_eq!(records[0].id, "plugin.b");
+            assert_eq!(records[1].id, "plugin.a");
+        });
+    }
+
+    #[test]
+    fn batch_task_repository_deletes_finished_tasks_but_keeps_active_tasks() {
+        tauri::async_runtime::block_on(async {
+            let database = Database::in_memory().await.expect("database should open");
+            let active = database
+                .create_batch_task("replayGain", &["active.flac".to_string()], None)
+                .await
+                .expect("active task should be created");
+            let finished = database
+                .create_batch_task("replayGain", &["finished.flac".to_string()], None)
+                .await
+                .expect("finished task should be created");
+            database
+                .start_batch_task(&finished.task_id)
+                .await
+                .expect("finished task should start");
+            database
+                .finish_batch_task(&finished.task_id, "succeeded", None)
+                .await
+                .expect("finished task should finish");
+
+            database
+                .delete_batch_tasks(&[active.task_id.clone(), finished.task_id.clone()])
+                .await
+                .expect("finished task deletion should succeed");
+
+            let tasks = database.load_batch_tasks().await.expect("tasks should load");
+            assert_eq!(tasks.len(), 1);
+            assert_eq!(tasks[0].task_id, active.task_id);
+        });
+    }
+
+    #[test]
     fn interrupted_batch_tasks_are_requeued_for_safe_recovery() {
         tauri::async_runtime::block_on(async {
             let database = Database::in_memory().await.expect("database should open");
@@ -1638,6 +2235,109 @@ mod tests {
                 Some("Recovered after application restart")
             );
         });
+    }
+
+    #[test]
+    fn track_summary_updates_do_not_rebuild_unrelated_collection_rows() {
+        tauri::async_runtime::block_on(async {
+            let database = Database::in_memory().await.expect("database should open");
+            let first = sample_track("C:\\Music\\first.flac", "first.flac");
+            let second = sample_track("C:\\Music\\second.flac", "second.flac");
+            database
+                .persist_folder_scan("C:\\Music", "test", &[first.clone(), second])
+                .await
+                .expect("folder scan should persist");
+            let artist_before = collection_ids(&database, "SELECT id FROM artists ORDER BY id")
+                .await;
+            let album_before = collection_ids(&database, "SELECT id FROM albums ORDER BY id")
+                .await;
+
+            let mut updated = first.clone();
+            updated.title = "Updated title".to_string();
+            database
+                .update_track_summary(&updated)
+                .await
+                .expect("track summary should update");
+
+            assert_eq!(
+                collection_ids(&database, "SELECT id FROM artists ORDER BY id").await,
+                artist_before
+            );
+            assert_eq!(
+                collection_ids(&database, "SELECT id FROM albums ORDER BY id").await,
+                album_before
+            );
+            let tracks = database.load_tracks_blocking().expect("tracks should load");
+            assert_eq!(tracks.iter().find(|track| track.path == first.path).unwrap().title, "Updated title");
+        });
+    }
+
+    #[test]
+    fn repeated_folder_scan_keeps_unchanged_song_rows() {
+        tauri::async_runtime::block_on(async {
+            let database = Database::in_memory().await.expect("database should open");
+            let kept = sample_track("C:\\Music\\kept.flac", "kept.flac");
+            let removed = sample_track("C:\\Music\\removed.flac", "removed.flac");
+            database
+                .persist_folder_scan("C:\\Music", "test", &[kept.clone(), removed])
+                .await
+                .expect("initial scan should persist");
+            let updated_before = song_updated_at(&database, &kept.path).await;
+            std::thread::sleep(std::time::Duration::from_secs(1));
+
+            database
+                .persist_folder_scan("C:\\Music", "test", std::slice::from_ref(&kept))
+                .await
+                .expect("repeat scan should persist");
+
+            assert_eq!(song_updated_at(&database, &kept.path).await, updated_before);
+            assert!(song_updated_at(&database, "C:\\Music\\removed.flac").await.is_none());
+            let tracks = database.load_tracks_blocking().expect("tracks should load");
+            assert_eq!(tracks.len(), 1);
+        });
+    }
+
+    #[test]
+    fn changed_scan_signature_rewrites_files_with_unchanged_fingerprints() {
+        tauri::async_runtime::block_on(async {
+            let database = Database::in_memory().await.expect("database should open");
+            let track = sample_track("C:\\Music\\kept.flac", "kept.flac");
+            database
+                .persist_folder_scan("C:\\Music", "separator=/", std::slice::from_ref(&track))
+                .await
+                .expect("initial scan should persist");
+            let mut retagged = track.clone();
+            retagged.artist = "Split Artist".to_string();
+            database
+                .persist_folder_scan("C:\\Music", "separator=;", std::slice::from_ref(&retagged))
+                .await
+                .expect("signature change should persist");
+
+            let tracks = database.load_tracks_blocking().expect("tracks should load");
+            assert_eq!(tracks[0].artist, "Split Artist");
+        });
+    }
+
+    async fn collection_ids(database: &Database, sql: &str) -> Vec<i64> {
+        let connection = database.lock().expect("database lock should be available");
+        let mut statement = connection.prepare(sql).expect("query should prepare");
+        statement
+            .query_map([], |row| row.get(0))
+            .expect("query should run")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("ids should read")
+    }
+
+    async fn song_updated_at(database: &Database, path: &str) -> Option<String> {
+        let connection = database.lock().expect("database lock should be available");
+        connection
+            .query_row(
+                "SELECT updated_at FROM songs WHERE path = ?1",
+                params![path],
+                |row| row.get(0),
+            )
+            .optional()
+            .expect("song timestamp should query")
     }
 
     #[test]
@@ -1704,6 +2404,32 @@ mod tests {
             replay_gain_album_gain: String::new(),
             replay_gain_album_peak: String::new(),
             replay_gain_reference_loudness: String::new(),
+            modified_at: None,
+            added_at: None,
+            created_at: None,
         }
+    }
+
+    #[test]
+    fn lyric_line_matching_requires_every_token() {
+        let lyrics = "[00:01.00] Hello World\n\n  Take on me  \n100% pure love";
+        let tokens: Vec<String> = ["hello", "world"]
+            .iter()
+            .map(|token| token.to_string())
+            .collect();
+        assert_eq!(
+            first_matching_lyric_line(lyrics, &tokens).as_deref(),
+            Some("[00:01.00] Hello World")
+        );
+
+        let tokens: Vec<String> = ["take", "me"].iter().map(|token| token.to_string()).collect();
+        assert_eq!(
+            first_matching_lyric_line(lyrics, &tokens).as_deref(),
+            Some("Take on me")
+        );
+
+        let tokens: Vec<String> = ["take", "zzz"].iter().map(|token| token.to_string()).collect();
+        assert_eq!(first_matching_lyric_line(lyrics, &tokens), None);
+        assert_eq!(escape_like_pattern("100%_a\\b"), "100\\%\\_a\\\\b");
     }
 }

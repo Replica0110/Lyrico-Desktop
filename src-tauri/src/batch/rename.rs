@@ -437,6 +437,9 @@ mod tests {
             replay_gain_album_gain: String::new(),
             replay_gain_album_peak: String::new(),
             replay_gain_reference_loudness: String::new(),
+            modified_at: None,
+            added_at: None,
+            created_at: None,
         }
     }
 }

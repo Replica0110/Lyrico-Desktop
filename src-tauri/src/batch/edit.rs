@@ -417,6 +417,9 @@ mod tests {
             replay_gain_album_gain: "".to_string(),
             replay_gain_album_peak: "".to_string(),
             replay_gain_reference_loudness: "".to_string(),
+            modified_at: None,
+            added_at: None,
+            created_at: None,
         }
     }
 }

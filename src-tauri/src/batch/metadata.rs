@@ -1,6 +1,7 @@
 use super::lyrics::render_plugin_lyrics;
 use super::processor::{BatchProcessor, ProcessContext, ProcessError, ProcessOutcome};
 use crate::audio::{read_track, save_tags, ArtworkMode};
+use crate::lyrics::LineTrack;
 use crate::models::{AudioTrack, TagUpdate};
 use crate::paths::resolve_data_paths;
 use crate::plugins::manifest::SourcePlugin;
@@ -62,6 +63,10 @@ struct MatchConfig {
     only_translation_if_available: bool,
     #[serde(default = "default_true")]
     remove_empty_lyric_lines: bool,
+    #[serde(default)]
+    lyric_line_order: Vec<LineTrack>,
+    #[serde(default)]
+    remove_tag_line_keywords: Vec<String>,
     #[serde(default = "default_conversion_mode")]
     lyrics_conversion_mode: String,
 }
@@ -109,6 +114,7 @@ impl BatchProcessor for MatchMetadataProcessor {
         let plugins = tauri::async_runtime::block_on(installer::load_plugins(
             context.database,
             &paths.plugins,
+            None,
         ))
         .map_err(ProcessError::Failed)?;
         let plugins = ordered_search_plugins(plugins, &config.enabled_source_order_ids);
@@ -139,6 +145,7 @@ impl BatchProcessor for MatchMetadataProcessor {
                         "separator": config.separator,
                         "config": plugin.config,
                     }),
+                    None,
                 );
                 match response {
                     Ok(response) => {
@@ -720,35 +727,48 @@ fn fetch_and_render_lyrics(
     let lyrics_response = runtime::invoke(
         plugin,
         "getLyrics",
-        json!({"song": song, "page": 1, "pageSize": 1, "config": plugin.config}),
-    )?;
-    let lyrics = first_lyrics_candidate(&lyrics_response)
-        .ok_or_else(|| "Plugin returned no usable lyrics candidates".to_string())?;
-    Ok(render_plugin_lyrics(
-        lyrics,
-        &config.lyric_format,
         json!({
-            "showTranslation": config.show_translation,
-            "showRomanization": config.show_romanization,
-            "onlyTranslationIfAvailable": config.only_translation_if_available,
-            "removeEmptyLines": config.remove_empty_lyric_lines,
-            "conversionMode": config.lyrics_conversion_mode,
+            "song": song,
+            "config": plugin.config,
+            "page": 1,
+            "pageSize": 10
         }),
-    )?
-    .text)
-}
-
-fn first_lyrics_candidate(response: &Value) -> Option<&Value> {
-    match response {
-        Value::Array(items) => items.first(),
-        Value::Object(object) => ["items", "results", "candidates"]
-            .iter()
-            .find_map(|key| object.get(*key).and_then(Value::as_array))
-            .and_then(|items| items.first())
-            .or(Some(response)),
-        Value::Null => None,
-        _ => Some(response),
+        None,
+    )?;
+    let mut candidates = crate::plugins::lyrics_candidates(&lyrics_response);
+    if plugin.manifest.api_version >= 4 {
+        candidates = crate::plugins::filter_api4_candidates(candidates);
     }
+    let title = string_value(result, &["title", "name", "songName"]);
+    let artist = string_value(result, &["artist", "artists", "singer"]);
+    let album = string_value(result, &["album", "albumName"]);
+    let candidates = crate::plugins::ordered_lyrics_candidates(candidates, &title, &artist, &album);
+    if candidates.is_empty() {
+        return Err("Plugin returned no lyrics candidates".to_string());
+    }
+    let options = json!({
+        "showTranslation": config.show_translation,
+        "showRomanization": config.show_romanization,
+        "onlyTranslationIfAvailable": config.only_translation_if_available,
+        "lineOrder": config.lyric_line_order,
+        "removeTagLineKeywords": config.remove_tag_line_keywords,
+        "removeEmptyLines": config.remove_empty_lyric_lines,
+        "conversionMode": config.lyrics_conversion_mode,
+    });
+    let mut last_error = String::new();
+    for candidate in &candidates {
+        let payload = crate::plugins::lyrics_payload(candidate);
+        match render_plugin_lyrics(&payload, &config.lyric_format, options.clone()) {
+            Ok(rendered) if !rendered.text.trim().is_empty() => return Ok(rendered.text),
+            Ok(_) => {}
+            Err(error) => last_error = error,
+        }
+    }
+    Err(if last_error.is_empty() {
+        "Plugin returned no usable lyrics".to_string()
+    } else {
+        last_error
+    })
 }
 
 fn should_write(config: &MatchConfig, key: &str, current_empty: bool) -> bool {
@@ -982,6 +1002,9 @@ mod tests {
             replay_gain_album_gain: String::new(),
             replay_gain_album_peak: String::new(),
             replay_gain_reference_loudness: String::new(),
+            modified_at: None,
+            added_at: None,
+            created_at: None,
         }
     }
 
@@ -1027,6 +1050,8 @@ mod tests {
             show_romanization: true,
             only_translation_if_available: false,
             remove_empty_lyric_lines: true,
+            lyric_line_order: Vec::new(),
+            remove_tag_line_keywords: Vec::new(),
             lyrics_conversion_mode: default_conversion_mode(),
         };
         let (update, changed) = build_update(&current, &fields, None, &config, "/");
