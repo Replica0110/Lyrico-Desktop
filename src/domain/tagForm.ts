@@ -29,5 +29,6 @@ export function completeTagForm(values: Partial<TagForm>, original: AudioTrack):
     replayGainReferenceLoudness: has("replayGainReferenceLoudness") ? values.replayGainReferenceLoudness ?? "" : original.replayGainReferenceLoudness,
     coverDataUrl: has("coverDataUrl") ? values.coverDataUrl : undefined,
     removeCover: has("removeCover") ? values.removeCover ?? false : false,
+    customTags: has("customTags") ? values.customTags ?? [] : [],
   };
 }

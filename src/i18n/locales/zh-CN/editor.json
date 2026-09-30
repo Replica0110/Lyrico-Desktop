@@ -36,7 +36,10 @@
     "title": "编辑标签",
     "localTags": "本地标签",
     "onlineMatch": "在线匹配",
-    "noOnlinePlugins": "没有可用的插件。",
+    "modeMatch": "元数据",
+    "modeLyrics": "歌词",
+    "modeCover": "封面",
+    "noOnlinePlugins": "请先安装并启用源插件。",
     "noOnlinePluginsForKind": "没有可用的插件，请先到“插件”中启用。",
     "searchKinds": {
       "aggregated": "综合",
@@ -45,7 +48,12 @@
       "covers": "封面"
     },
     "searchOnline": "搜索",
-    "noOnlineResults": "没有找到结果。",
+    "loadMore": "加载更多",
+    "noOnlineResults": "通过插件源搜索匹配的标签。",
+    "noLyricsResults": "通过插件源搜索可用歌词。",
+    "noCoverResults": "通过插件源搜索封面。",
+    "lyricsCandidates": "歌词候选",
+    "lyricsCandidateCount": "{{total}} 个候选",
     "applyMatch": "应用字段",
     "reviewMatch": "查看并应用",
     "reviewTags": "查看标签",
@@ -72,6 +80,7 @@
     "fetchLyrics": "获取歌词",
     "lyricsNotFound": "没有找到歌词。",
     "fileInfo": "文件信息",
+    "share": "分享",
     "fileName": "文件名",
     "bitrate": "比特率",
     "sampleRate": "采样率",
@@ -80,6 +89,7 @@
       "basic": "基础信息",
       "track": "曲目详情",
       "credits": "贡献者与其他",
+      "customTags": "自定义标签",
       "replayGain": "回放增益",
       "lyrics": "歌词",
       "cover": "评分"
@@ -101,6 +111,9 @@
     "referenceLoudness": "参考响度",
     "referenceLoudnessPending": "此项暂不可编辑。",
     "comment": "注释",
+    "customTagKey": "标签键",
+    "customTagValue": "标签值",
+    "addCustomTag": "添加自定义标签",
     "lyrics": "歌词",
     "cover": "封面",
     "file": "文件",
@@ -119,5 +132,6 @@
     "lyricsImported": "歌词已导入编辑器",
     "lyricsExported": "歌词已导出",
     "coverExported": "封面已导出"
+    ,"shared": "已打开系统分享面板"
   }
 }

@@ -36,7 +36,10 @@
     "title": "Edit tags",
     "localTags": "Local tags",
     "onlineMatch": "Online matching",
-    "noOnlinePlugins": "No plugins available.",
+    "modeMatch": "Metadata",
+    "modeLyrics": "Lyrics",
+    "modeCover": "Covers",
+    "noOnlinePlugins": "Install and enable a source plugin first.",
     "noOnlinePluginsForKind": "No plugins available. Enable one from Plugins.",
     "searchKinds": {
       "aggregated": "All-in-one",
@@ -45,7 +48,12 @@
       "covers": "Artwork"
     },
     "searchOnline": "Search",
-    "noOnlineResults": "No results.",
+    "loadMore": "Load more",
+    "noOnlineResults": "Search a plugin source to find matching metadata.",
+    "noLyricsResults": "Search a plugin source to find lyrics candidates.",
+    "noCoverResults": "Search a plugin source to find covers.",
+    "lyricsCandidates": "Lyrics candidates",
+    "lyricsCandidateCount": "{{total}} candidates",
     "applyMatch": "Apply fields",
     "reviewMatch": "Review and apply",
     "reviewTags": "Review tags",
@@ -72,6 +80,7 @@
     "fetchLyrics": "Get lyrics",
     "lyricsNotFound": "No lyrics found.",
     "fileInfo": "File information",
+    "share": "Share",
     "fileName": "File name",
     "bitrate": "Bitrate",
     "sampleRate": "Sample rate",
@@ -80,6 +89,7 @@
       "basic": "Basic information",
       "track": "Track details",
       "credits": "Credits and other",
+      "customTags": "Custom tags",
       "replayGain": "ReplayGain",
       "lyrics": "Lyrics",
       "cover": "Rating"
@@ -101,6 +111,9 @@
     "referenceLoudness": "Reference loudness",
     "referenceLoudnessPending": "This field is read-only.",
     "comment": "Annotation",
+    "customTagKey": "Tag key",
+    "customTagValue": "Tag value",
+    "addCustomTag": "Add custom tag",
     "lyrics": "Lyrics",
     "cover": "Cover",
     "file": "File",
@@ -119,5 +132,6 @@
     "lyricsImported": "Lyrics were imported into the editor",
     "lyricsExported": "Lyrics were exported",
     "coverExported": "Cover was exported"
+    ,"shared": "Share sheet opened"
   }
 }
