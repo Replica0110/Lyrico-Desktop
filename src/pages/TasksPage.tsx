@@ -1,6 +1,6 @@
 import {
   CalculatorOutlined,
-  ArrowLeftOutlined,
+  DeleteOutlined,
   EditOutlined,
   ExportOutlined,
   FileTextOutlined,
@@ -10,16 +10,16 @@ import {
   TagsOutlined,
 } from "@ant-design/icons";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
-import { App, Button, Checkbox, Empty, Input, InputNumber, Modal, Progress, Rate, Segmented, Select, Space, Table, Tag, Tooltip, Typography, type TableColumnsType } from "antd";
-import { createContext, memo, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { App, Button, Card, Checkbox, Input, InputNumber, Modal, Popconfirm, Progress, Rate, Select, Space, Table, Tag, Tooltip, Typography, type TableColumnsType } from "antd";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
-import type { AudioTrack, BatchTask, BatchTaskItem, CharacterMappingRule, DesktopSettings, RenamePreview, SourcePlugin } from "../app/types";
-import { cancelBatchTask, createBatchTask, loadBatchTaskItems, loadBatchTasks, previewBatchRename, readImageFile, startBatchTask } from "../backend/audioApi";
+import type { AudioTrack, BatchTask, CharacterMappingRule, DesktopSettings, RenamePreview, SourcePlugin } from "../app/types";
+import { cancelBatchTask, createBatchTask, deleteBatchTasks, loadBatchTasks, pickPaths, previewBatchRename, readImageFile, retryFailedBatchItems, startBatchTask } from "../backend/audioApi";
 import { TrackArtwork } from "../components/TrackArtwork";
 import { LYRIC_FORMATS, type LyricFormat } from "../backend/lyricsApi";
 import { clearFinishedTask, currentActiveTask, isActiveTask, mergeBatchTaskSnapshot } from "../domain/batchTasks";
-import { isPluginSourceEnabled, normalizedCapabilities, pluginSourceOrder } from "../domain/pluginSources";
+import { buildMatchTargetModes, type BatchMatchMode } from "../domain/batchMatch";
+import { parseTimeValue } from "../utils/format";
 
 const { Title, Text } = Typography;
 
@@ -34,7 +34,7 @@ type GainRow = {
   status: "present" | "missing";
 };
 
-type BatchOperation = "metadata" | "edit" | "rename" | "lyrics" | "exportLyrics" | "exportCover" | "replaygain";
+type BatchOperation = "metadata" | "matchLyrics" | "matchCover" | "edit" | "rename" | "lyrics" | "exportLyrics" | "exportCover" | "replaygain" | "delete";
 
 type LyricsFormatConfig = {
   targetFormat?: LyricFormat;
@@ -45,6 +45,7 @@ type LyricsFormatConfig = {
 
 type MetadataWriteMode = "disabled" | "supplement" | "overwrite";
 type MetadataMatchConfig = {
+  matchMode: BatchMatchMode;
   targetModes: Record<string, MetadataWriteMode>;
   enabledSourceOrderIds: string[];
   preferFileName: boolean;
@@ -91,11 +92,6 @@ const metadataTargets = [
   ["replaygain_album_peak", "tasks.albumPeak"],
 ] as const;
 
-const defaultMetadataTargets = new Set(["title", "artist", "album", "genre", "date", "track_number", "lyrics", "cover_url"]);
-const defaultMetadataModes: Record<string, MetadataWriteMode> = Object.fromEntries(
-  metadataTargets.map(([key]) => [key, defaultMetadataTargets.has(key) ? "supplement" : "disabled"]),
-);
-
 const defaultTagLineKeywords = [
   "[by:", "[kana:", "[trans:", "[roma:",
   "作词：", "作词:", "作曲：", "作曲:", "编曲：", "编曲:",
@@ -105,21 +101,22 @@ const defaultTagLineKeywords = [
   "出品：", "出品:", "发行：", "发行:",
 ];
 
-const availableOperations = new Set<BatchOperation>(["metadata", "edit", "rename", "lyrics", "exportLyrics", "exportCover", "replaygain"]);
+const availableOperations = new Set<BatchOperation>(["metadata", "matchLyrics", "matchCover", "edit", "rename", "lyrics", "exportLyrics", "exportCover", "replaygain", "delete"]);
 
 const operationIcons: Record<BatchOperation, ReactNode> = {
   metadata: <TagsOutlined />,
+  matchLyrics: <FileTextOutlined />,
+  matchCover: <FolderOpenOutlined />,
   edit: <EditOutlined />,
   rename: <FormOutlined />,
   lyrics: <FileTextOutlined />,
   exportLyrics: <ExportOutlined />,
   exportCover: <ExportOutlined />,
   replaygain: <CalculatorOutlined />,
+  delete: <DeleteOutlined />,
 };
 
-const BatchLogNavigationContext = createContext<(task: BatchTask) => void>(() => undefined);
-
-export const TasksPage = memo(function TasksPage({ tracks, plugins, selectedPaths, settings, artistSeparator, onChangeSettings }: { tracks: AudioTrack[]; plugins: SourcePlugin[]; selectedPaths: string[]; settings: DesktopSettings; artistSeparator: string; onChangeSettings: (settings: DesktopSettings) => void }) {
+export function TasksPage({ tracks, plugins, selectedPaths, settings, artistSeparator, onChangeSettings }: { tracks: AudioTrack[]; plugins: SourcePlugin[]; selectedPaths: string[]; settings: DesktopSettings; artistSeparator: string; onChangeSettings: (settings: DesktopSettings) => void }) {
   const { t } = useTranslation();
   const { message } = App.useApp();
   const [operation, setOperation] = useState<BatchOperation>("replaygain");
@@ -130,11 +127,12 @@ export const TasksPage = memo(function TasksPage({ tracks, plugins, selectedPath
   const [activeRenameTask, setActiveRenameTask] = useState<BatchTask>();
   const [activeExportLyricsTask, setActiveExportLyricsTask] = useState<BatchTask>();
   const [activeExportCoverTask, setActiveExportCoverTask] = useState<BatchTask>();
+  const [activeDeleteTask, setActiveDeleteTask] = useState<BatchTask>();
+  const [taskHistory, setTaskHistory] = useState<BatchTask[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const [logTask, setLogTask] = useState<BatchTask>();
   const selectedSet = useMemo(() => new Set(selectedPaths), [selectedPaths]);
   const selectedTracks = useMemo(() => tracks.filter((track) => selectedSet.has(track.path)), [selectedSet, tracks]);
-  const operations = ["metadata", "edit", "rename", "lyrics", "exportLyrics", "exportCover", "replaygain"] as BatchOperation[];
+  const operations = ["metadata", "matchLyrics", "matchCover", "edit", "rename", "lyrics", "exportLyrics", "exportCover", "replaygain", "delete"] as BatchOperation[];
   const replayGainIsActive = isActiveTask(activeReplayGainTask);
   const editIsActive = isActiveTask(activeEditTask);
   const lyricsIsActive = isActiveTask(activeLyricsTask);
@@ -142,28 +140,30 @@ export const TasksPage = memo(function TasksPage({ tracks, plugins, selectedPath
   const renameIsActive = isActiveTask(activeRenameTask);
   const exportLyricsIsActive = isActiveTask(activeExportLyricsTask);
   const exportCoverIsActive = isActiveTask(activeExportCoverTask);
+  const deleteIsActive = isActiveTask(activeDeleteTask);
 
   useEffect(() => {
     let disposed = false;
     void loadBatchTasks()
       .then((tasks) => {
         if (disposed) return;
-        const byType = new Map<string, BatchTask[]>();
-        for (const task of tasks) {
-          let bucket = byType.get(task.taskType);
-          if (!bucket) {
-            bucket = [];
-            byType.set(task.taskType, bucket);
-          }
-          bucket.push(task);
-        }
-        setActiveReplayGainTask(currentActiveTask(byType.get("replayGain") ?? []));
-        setActiveEditTask(currentActiveTask(byType.get("editTags") ?? []));
-        setActiveLyricsTask(currentActiveTask(byType.get("formatLyrics") ?? []));
-        setActiveMetadataTask(currentActiveTask(byType.get("matchMetadata") ?? []));
-        setActiveRenameTask(currentActiveTask(byType.get("renameFiles") ?? []));
-        setActiveExportLyricsTask(currentActiveTask(byType.get("exportLyrics") ?? []));
-        setActiveExportCoverTask(currentActiveTask(byType.get("exportCover") ?? []));
+        setTaskHistory(tasks);
+        const replayGainTasks = tasks.filter((task) => task.taskType === "replayGain");
+        const editTasks = tasks.filter((task) => task.taskType === "editTags");
+        const lyricsTasks = tasks.filter((task) => task.taskType === "formatLyrics");
+        const metadataTasks = tasks.filter((task) => task.taskType === "matchMetadata");
+        const renameTasks = tasks.filter((task) => task.taskType === "renameFiles");
+        const exportLyricsTasks = tasks.filter((task) => task.taskType === "exportLyrics");
+        const exportCoverTasks = tasks.filter((task) => task.taskType === "exportCover");
+        const deleteTasks = tasks.filter((task) => task.taskType === "deleteFiles");
+        setActiveReplayGainTask(currentActiveTask(replayGainTasks));
+        setActiveEditTask(currentActiveTask(editTasks));
+        setActiveLyricsTask(currentActiveTask(lyricsTasks));
+        setActiveMetadataTask(currentActiveTask(metadataTasks));
+        setActiveRenameTask(currentActiveTask(renameTasks));
+        setActiveExportLyricsTask(currentActiveTask(exportLyricsTasks));
+        setActiveExportCoverTask(currentActiveTask(exportCoverTasks));
+        setActiveDeleteTask(currentActiveTask(deleteTasks));
       })
       .catch((error) => message.error(String(error)));
     return () => {
@@ -193,7 +193,16 @@ export const TasksPage = memo(function TasksPage({ tracks, plugins, selectedPath
         updateTask(setActiveExportLyricsTask);
       } else if (payload.taskType === "exportCover") {
         updateTask(setActiveExportCoverTask);
+      } else if (payload.taskType === "deleteFiles") {
+        updateTask(setActiveDeleteTask);
       }
+      setTaskHistory((current) => {
+        const index = current.findIndex((task) => task.taskId === payload.taskId);
+        if (index < 0) return [payload, ...current];
+        const next = current.slice();
+        next[index] = mergeBatchTaskSnapshot(next[index], payload);
+        return next;
+      });
     }).then((dispose) => {
       if (disposed) dispose();
       else unlisten = dispose;
@@ -213,6 +222,7 @@ export const TasksPage = memo(function TasksPage({ tracks, plugins, selectedPath
     clear(setActiveRenameTask);
     clear(setActiveExportLyricsTask);
     clear(setActiveExportCoverTask);
+    clear(setActiveDeleteTask);
   }
 
   function changeOperation(nextOperation: BatchOperation) {
@@ -223,6 +233,38 @@ export const TasksPage = memo(function TasksPage({ tracks, plugins, selectedPath
 
   function applyTaskSnapshot(setTask: Dispatch<SetStateAction<BatchTask | undefined>>, snapshot: BatchTask) {
     setTask((current) => mergeBatchTaskSnapshot(current, snapshot));
+    setTaskHistory((current) => {
+      const index = current.findIndex((task) => task.taskId === snapshot.taskId);
+      if (index < 0) return [snapshot, ...current];
+      const next = current.slice();
+      next[index] = mergeBatchTaskSnapshot(next[index], snapshot);
+      return next;
+    });
+  }
+
+  async function refreshTaskHistory() {
+    const tasks = await loadBatchTasks();
+    setTaskHistory(tasks);
+  }
+
+  async function retryTask(task: BatchTask) {
+    try {
+      await retryFailedBatchItems(task.taskId);
+      await refreshTaskHistory();
+      message.success(t("tasks.historyRetryStarted"));
+    } catch (error) {
+      message.error(String(error));
+    }
+  }
+
+  async function deleteTask(task: BatchTask) {
+    try {
+      await deleteBatchTasks([task.taskId]);
+      setTaskHistory((current) => current.filter((item) => item.taskId !== task.taskId));
+      message.success(t("tasks.historyDeleted"));
+    } catch (error) {
+      message.error(String(error));
+    }
   }
 
   async function runReplayGain() {
@@ -232,7 +274,7 @@ export const TasksPage = memo(function TasksPage({ tracks, plugins, selectedPath
       const created = await createBatchTask(
         "replayGain",
         selectedTracks.map((track) => track.path),
-        JSON.stringify({ concurrency: 3, mode: "track", targetLoudness: settings.replayGainTargetLoudness }),
+        JSON.stringify({ concurrency: 3, mode: "track" }),
       );
       applyTaskSnapshot(setActiveReplayGainTask, created);
       const started = await startBatchTask(created.taskId);
@@ -293,7 +335,9 @@ export const TasksPage = memo(function TasksPage({ tracks, plugins, selectedPath
         JSON.stringify({
           ...config,
           targetFormat: config.targetFormat ?? null,
-          tagLineKeywords: defaultTagLineKeywords,
+          tagLineKeywords: settings.removeTagLineKeywords.length
+            ? settings.removeTagLineKeywords
+            : defaultTagLineKeywords,
           concurrency: 3,
         }),
       );
@@ -331,9 +375,11 @@ export const TasksPage = memo(function TasksPage({ tracks, plugins, selectedPath
           lyricFormat: settings.lyricFormat,
           showTranslation: settings.showTranslation,
           showRomanization: settings.showRomanization,
-          onlyTranslationIfAvailable: settings.onlyTranslationIfAvailable,
-          removeEmptyLyricLines: settings.removeEmptyLyricLines,
-          lyricsConversionMode: settings.lyricsConversionMode,
+           onlyTranslationIfAvailable: settings.onlyTranslationIfAvailable,
+           removeEmptyLyricLines: settings.removeEmptyLyricLines,
+           lyricLineOrder: settings.lyricLineOrder,
+           removeTagLineKeywords: settings.removeTagLineKeywords,
+           lyricsConversionMode: settings.lyricsConversionMode,
         }),
       );
       applyTaskSnapshot(setActiveMetadataTask, created);
@@ -418,16 +464,33 @@ export const TasksPage = memo(function TasksPage({ tracks, plugins, selectedPath
     }
   }
 
-  if (logTask) {
-    const currentLogTask = [activeReplayGainTask, activeEditTask, activeLyricsTask, activeMetadataTask, activeRenameTask, activeExportLyricsTask, activeExportCoverTask]
-      .find((task) => task?.taskId === logTask.taskId) ?? logTask;
-    return <BatchTaskLogPage task={currentLogTask} onBack={() => setLogTask(undefined)} />;
+  async function runDelete() {
+    if (selectedTracks.length === 0 || deleteIsActive) return;
+    setSubmitting(true);
+    try {
+      const created = await createBatchTask("deleteFiles", selectedTracks.map((track) => track.path));
+      applyTaskSnapshot(setActiveDeleteTask, created);
+      applyTaskSnapshot(setActiveDeleteTask, await startBatchTask(created.taskId));
+    } catch (error) {
+      message.error(String(error));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function cancelDelete() {
+    if (!activeDeleteTask || !deleteIsActive) return;
+    try {
+      applyTaskSnapshot(setActiveDeleteTask, await cancelBatchTask(activeDeleteTask.taskId));
+      message.info(t("tasks.batchCancelled"));
+    } catch (error) {
+      message.error(String(error));
+    }
   }
 
   return (
-    <BatchLogNavigationContext.Provider value={setLogTask}>
     <div className="workspace page-stack tasks-view">
-      <header className="workspace-page-header batch-page-header">
+      <header className="batch-page-header">
         <Title level={2}>{t("tasks.title")}</Title>
         <Text strong>{t("selection.count", { count: selectedTracks.length })}</Text>
       </header>
@@ -450,10 +513,12 @@ export const TasksPage = memo(function TasksPage({ tracks, plugins, selectedPath
         })}
       </div>
 
-      {operation === "metadata" ? (
+      {operation === "metadata" || operation === "matchLyrics" || operation === "matchCover" ? (
         <MetadataMatchPanel
+          key={operation}
           tracks={selectedTracks}
           plugins={plugins}
+          matchMode={operation === "metadata" ? "metadata" : operation === "matchLyrics" ? "lyrics" : "cover"}
           task={activeMetadataTask}
           submitting={submitting}
           onRun={runMetadataMatch}
@@ -503,6 +568,14 @@ export const TasksPage = memo(function TasksPage({ tracks, plugins, selectedPath
           onRun={(destinationDirectory, concurrency) => runBatchExport("exportCover", destinationDirectory, concurrency)}
           onCancel={() => cancelBatchExport("exportCover")}
         />
+      ) : operation === "delete" ? (
+        <DeleteFilesPanel
+          tracks={selectedTracks}
+          task={activeDeleteTask}
+          submitting={submitting}
+          onRun={runDelete}
+          onCancel={cancelDelete}
+        />
       ) : (
         <ReplayGainTagsPanel
           tracks={selectedTracks}
@@ -512,21 +585,154 @@ export const TasksPage = memo(function TasksPage({ tracks, plugins, selectedPath
           onCancel={cancelReplayGain}
         />
       )}
+      <TaskHistory
+        tasks={taskHistory}
+        onRefresh={() => void refreshTaskHistory()}
+        onRetry={(task) => void retryTask(task)}
+        onDelete={(task) => void deleteTask(task)}
+      />
     </div>
-    </BatchLogNavigationContext.Provider>
   );
-});
+}
 
-function MetadataMatchPanel({ tracks, plugins, task, submitting, onRun, onCancel }: { tracks: AudioTrack[]; plugins: SourcePlugin[]; task?: BatchTask; submitting: boolean; onRun: (config: MetadataMatchConfig) => void; onCancel: () => void }) {
+function TaskHistory({
+  tasks,
+  onRefresh,
+  onRetry,
+  onDelete,
+}: {
+  tasks: BatchTask[];
+  onRefresh: () => void;
+  onRetry: (task: BatchTask) => void;
+  onDelete: (task: BatchTask) => void;
+}) {
   const { t } = useTranslation();
-  const availableSources = useMemo(() => plugins
-    .filter((plugin) => isPluginSourceEnabled(plugin, "metadata") && normalizedCapabilities(plugin).includes("searchSongs"))
-    .sort((left, right) => pluginSourceOrder(left, "metadata") - pluginSourceOrder(right, "metadata")), [plugins]);
+  const columns: TableColumnsType<BatchTask> = [
+    { title: t("tasks.historyType"), dataIndex: "taskType", width: 150 },
+    {
+      title: t("tasks.historyStatus"),
+      dataIndex: "status",
+      width: 110,
+      sorter: (left, right) => left.status.localeCompare(right.status),
+    },
+    {
+      title: t("tasks.historyProgress"),
+      key: "progress",
+      width: 220,
+      render: (_, task) => t("tasks.taskSummary", {
+        current: task.current,
+        total: task.total,
+        success: task.successCount,
+        skipped: task.skippedCount,
+        failed: task.failureCount,
+      }),
+    },
+    {
+      title: t("tasks.historyCreated"),
+      dataIndex: "createdAt",
+      width: 180,
+      sorter: (left, right) => parseTimeValue(left.createdAt) - parseTimeValue(right.createdAt),
+    },
+    {
+      title: t("tasks.historyActions"),
+      key: "actions",
+      width: 170,
+      render: (_, task) => (
+        <Space>
+          {task.failureCount > 0 && !isActiveTask(task) ? (
+            <Button size="small" onClick={() => onRetry(task)}>{t("tasks.historyRetry")}</Button>
+          ) : null}
+          {!isActiveTask(task) ? (
+            <Popconfirm title={t("tasks.historyDeleteConfirm")} onConfirm={() => onDelete(task)}>
+              <Button size="small" danger>{t("common.delete")}</Button>
+            </Popconfirm>
+          ) : null}
+        </Space>
+      ),
+    },
+  ];
+  return (
+    <Card
+      className="content-card task-history-card"
+      title={t("tasks.historyTitle")}
+      extra={<Button size="small" onClick={onRefresh}>{t("tasks.historyRefresh")}</Button>}
+      styles={{ body: { padding: 0 } }}
+    >
+      <Table
+        rowKey="taskId"
+        size="small"
+        pagination={{ pageSize: 8, hideOnSinglePage: true }}
+        columns={columns}
+        dataSource={tasks}
+        locale={{ emptyText: t("tasks.historyEmpty") }}
+        scroll={{ x: 820 }}
+      />
+    </Card>
+  );
+}
+
+function DeleteFilesPanel({
+  tracks,
+  task,
+  submitting,
+  onRun,
+  onCancel,
+}: {
+  tracks: AudioTrack[];
+  task?: BatchTask;
+  submitting: boolean;
+  onRun: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  const columns: TableColumnsType<AudioTrack> = [
+    {
+      title: t("table.track"),
+      dataIndex: "title",
+      render: (_, track) => (
+        <Space size={12}>
+          <TrackArtwork track={track} size={38} />
+          <div className="track-title-cell">
+            <Text strong>{track.title || track.fileName}</Text>
+            <Text type="secondary">{track.artist || t("common.unknownArtist")}</Text>
+          </div>
+        </Space>
+      ),
+    },
+    { title: t("tasks.fileName"), dataIndex: "fileName", ellipsis: true },
+  ];
+  return (
+    <section className="batch-panel">
+      <Text type="danger">{t("tasks.deleteWarning")}</Text>
+      <Table className="batch-table" rowKey="path" columns={columns} dataSource={tracks} size="middle" pagination={{ pageSize: 20, showSizeChanger: false, hideOnSinglePage: true }} scroll={{ x: 720 }} />
+      <footer className="batch-panel-footer">
+        {task && <BatchTaskProgress task={task} />}
+        {isActiveTask(task) ? (
+          <Button danger onClick={onCancel}>{t("common.cancel")}</Button>
+        ) : (
+          <Popconfirm title={t("tasks.deleteConfirm")} onConfirm={onRun} okButtonProps={{ danger: true }}>
+            <Button danger type="primary" icon={<DeleteOutlined />} loading={submitting} disabled={tracks.length === 0}>
+              {t("tasks.startDelete")}
+            </Button>
+          </Popconfirm>
+        )}
+      </footer>
+    </section>
+  );
+}
+
+function MetadataMatchPanel({ tracks, plugins, matchMode, task, submitting, onRun, onCancel }: { tracks: AudioTrack[]; plugins: SourcePlugin[]; matchMode: BatchMatchMode; task?: BatchTask; submitting: boolean; onRun: (config: MetadataMatchConfig) => void; onCancel: () => void }) {
+  const { t } = useTranslation();
+  const availableSources = useMemo(() => plugins.filter((plugin) => plugin.enabled && plugin.capabilities.includes("searchSongs")), [plugins]);
   const [enabledSources, setEnabledSources] = useState<string[]>(availableSources.map((plugin) => plugin.id));
-  const [targetModes, setTargetModes] = useState<Record<string, MetadataWriteMode>>(defaultMetadataModes);
+  const [targetModes, setTargetModes] = useState<Record<string, MetadataWriteMode>>(() => buildMatchTargetModes(matchMode));
   const [preferFileName, setPreferFileName] = useState(false);
   const [concurrency, setConcurrency] = useState(3);
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  useEffect(() => {
+    setTargetModes(buildMatchTargetModes(matchMode));
+  }, [matchMode]);
 
   useEffect(() => {
     const sourceIds = availableSources.map((plugin) => plugin.id);
@@ -591,7 +797,7 @@ function MetadataMatchPanel({ tracks, plugins, task, submitting, onRun, onCancel
         columns={columns}
         dataSource={tracks}
         size="middle"
-        pagination={false}
+        pagination={{ pageSize: 20, showSizeChanger: false, hideOnSinglePage: true }}
         scroll={{ x: 720 }}
       />
       <footer className="batch-panel-footer">
@@ -604,9 +810,9 @@ function MetadataMatchPanel({ tracks, plugins, task, submitting, onRun, onCancel
             icon={<TagsOutlined />}
             loading={submitting}
             disabled={tracks.length === 0 || enabledSources.length === 0 || Object.values(targetModes).every((mode) => mode === "disabled")}
-            onClick={() => onRun({ targetModes, enabledSourceOrderIds: enabledSources, preferFileName, concurrency })}
+            onClick={() => onRun({ matchMode, targetModes, enabledSourceOrderIds: enabledSources, preferFileName, concurrency })}
           >
-            {t("tasks.startMetadataMatch")}
+            {t(matchMode === "lyrics" ? "tasks.startLyricsMatch" : matchMode === "cover" ? "tasks.startCoverMatch" : "tasks.startMetadataMatch")}
           </Button>
         )}
       </footer>
@@ -659,12 +865,12 @@ function EditTagsPanel({ tracks, task, submitting, onRun, onCancel }: { tracks: 
   const hasOperation = enabledFields.length > 0 || ratingModified || Boolean(coverPath) || removeCover || lyricsOffsetMs !== 0;
 
   async function chooseBatchCover() {
-    const selected = await open({
+    const [selected] = await pickPaths({
       multiple: false,
       title: t("cover.choose"),
       filters: [{ name: t("cover.images"), extensions: ["jpg", "jpeg", "png", "webp", "gif"] }],
     });
-    if (typeof selected !== "string") return;
+    if (!selected) return;
     try {
       setCoverPreview(await readImageFile(selected));
       setCoverPath(selected);
@@ -737,7 +943,7 @@ function EditTagsPanel({ tracks, task, submitting, onRun, onCancel }: { tracks: 
           <Tag color={hasOperation ? "processing" : "default"}>{t("tasks.changeCount", { count: enabledFields.length + Number(ratingModified) + Number(Boolean(coverPath) || removeCover) + Number(lyricsOffsetMs !== 0) })}</Tag>
         </Space>
       </div>
-      <Table className="batch-table" rowKey="path" columns={columns} dataSource={tracks} size="middle" pagination={false} scroll={{ x: 900 }} />
+      <Table className="batch-table" rowKey="path" columns={columns} dataSource={tracks} size="middle" pagination={{ pageSize: 20, showSizeChanger: false, hideOnSinglePage: true }} scroll={{ x: 900 }} />
       <footer className="batch-panel-footer">
         {task && <BatchTaskProgress task={task} />}
         {isActiveTask(task) ? (
@@ -797,12 +1003,12 @@ const defaultCharacterReplacements: Record<string, string> = {
 };
 const renameReplacementOptions = ["", "、", ",", "，", "＼", "／", "：", "＊", "？", "＂", "＜", "＞", "｜", "&"];
 
-function defaultRenameRules(characterMappings: Record<string, string>, name: string, description: string): CharacterMappingRule[] {
+function defaultRenameRules(characterMappings: Record<string, string>): CharacterMappingRule[] {
   return [{
     id: "builtin-invalid-file-characters",
-    name,
+    name: "Invalid file characters",
     charMappings: { ...defaultCharacterReplacements, ...characterMappings },
-    description,
+    description: "Replace characters that are invalid in Windows file names",
     isBuiltIn: true,
     isEnabled: true,
   }];
@@ -811,7 +1017,7 @@ function defaultRenameRules(characterMappings: Record<string, string>, name: str
 function RenameFilesPanel({ tracks, task, submitting, onRun, onCancel, characterMappings, onChangeCharacterMappings }: { tracks: AudioTrack[]; task?: BatchTask; submitting: boolean; onRun: (config: RenameFilesConfig) => void; onCancel: () => void; characterMappings: Record<string, string>; onChangeCharacterMappings: (mappings: Record<string, string>) => void }) {
   const { t } = useTranslation();
   const [renameFormat, setRenameFormat] = useState("@1 - @2");
-  const rules = useMemo(() => defaultRenameRules(characterMappings, t("tasks.characterMappings"), t("tasks.characterMappingsHint")), [characterMappings, t]);
+  const rules = useMemo(() => defaultRenameRules(characterMappings), [characterMappings]);
   const [previews, setPreviews] = useState<RenamePreview[]>([]);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
@@ -994,7 +1200,7 @@ function LyricsFormatPanel({ tracks, task, submitting, onRun, onCancel }: { trac
           <Checkbox checked={removeEmptyLines} onChange={(event) => setRemoveEmptyLines(event.target.checked)}>{t("lyrics.removeEmpty")}</Checkbox>
         </Space>
       </div>
-      <Table className="batch-table" rowKey="path" columns={columns} dataSource={tracks} size="middle" pagination={false} scroll={{ x: 720 }} />
+      <Table className="batch-table" rowKey="path" columns={columns} dataSource={tracks} size="middle" pagination={{ pageSize: 20, showSizeChanger: false, hideOnSinglePage: true }} scroll={{ x: 720 }} />
       <footer className="batch-panel-footer">
         {task && <BatchTaskProgress task={task} />}
         {isActiveTask(task) ? (
@@ -1031,12 +1237,12 @@ function ExportPanel({ exportType, tracks, task, submitting, onRun, onCancel }: 
 
   async function chooseDestination() {
     try {
-      const selected = await open({
+      const [selected] = await pickPaths({
         directory: true,
         multiple: false,
         title: t("tasks.chooseExportDestination"),
       });
-      if (typeof selected === "string") setDestinationDirectory(selected);
+      if (selected) setDestinationDirectory(selected);
     } catch (error) {
       message.error(String(error));
     }
@@ -1086,7 +1292,7 @@ function ExportPanel({ exportType, tracks, task, submitting, onRun, onCancel }: 
           </Space>
         </Space>
       </div>
-      <Table className="batch-table" rowKey="path" columns={columns} dataSource={tracks} size="middle" pagination={false} scroll={{ x: 760 }} />
+      <Table className="batch-table" rowKey="path" columns={columns} dataSource={tracks} size="middle" pagination={{ pageSize: 20, showSizeChanger: false, hideOnSinglePage: true }} scroll={{ x: 760 }} />
       <footer className="batch-panel-footer">
         {task && <BatchTaskProgress task={task} />}
         {isActiveTask(task) ? (
@@ -1152,7 +1358,7 @@ function ReplayGainTagsPanel({ tracks, task, submitting, onRun, onCancel }: { tr
         columns={columns}
         dataSource={rows}
         size="middle"
-        pagination={false}
+        pagination={{ pageSize: 20, showSizeChanger: false, hideOnSinglePage: true }}
         scroll={{ x: 920 }}
       />
       <footer className="batch-panel-footer">
@@ -1169,78 +1375,12 @@ function ReplayGainTagsPanel({ tracks, task, submitting, onRun, onCancel }: { tr
 
 function BatchTaskProgress({ task }: { task: BatchTask }) {
   const { t } = useTranslation();
-  const openLog = useContext(BatchLogNavigationContext);
-
   return (
     <div className="batch-task-progress">
       <Progress percent={task.total ? Math.round((task.current / task.total) * 100) : 0} showInfo={false} size="small" status={task.status === "failed" ? "exception" : task.status === "succeeded" ? "success" : "active"} />
-      <Space size={8} wrap>
-        <Text type="secondary">
-          {t("tasks.taskSummary", { current: task.current, total: task.total, success: task.successCount, skipped: task.skippedCount, failed: task.failureCount })}
-        </Text>
-        <Button type="link" size="small" onClick={() => openLog(task)}>{t("tasks.viewLog")}</Button>
-      </Space>
-    </div>
-  );
-}
-
-function BatchTaskLogPage({ task, onBack }: { task: BatchTask; onBack: () => void }) {
-  const { t } = useTranslation();
-  const [logStatus, setLogStatus] = useState<"succeeded" | "failed" | "skipped">(() => task.failureCount > 0 ? "failed" : task.skippedCount > 0 ? "skipped" : "succeeded");
-  const [items, setItems] = useState<BatchTaskItem[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    let disposed = false;
-    setLoading(true);
-    void loadBatchTaskItems(task.taskId)
-      .then((nextItems) => {
-        if (!disposed) setItems(nextItems);
-      })
-      .finally(() => {
-        if (!disposed) setLoading(false);
-      });
-    return () => { disposed = true; };
-  }, [task.current, task.status, task.taskId]);
-
-  const counts = useMemo(() => ({
-    succeeded: items.filter((item) => item.status === "succeeded").length,
-    failed: items.filter((item) => item.status === "failed").length,
-    skipped: items.filter((item) => item.status === "skipped").length,
-  }), [items]);
-  const visibleItems = items.filter((item) => item.status === logStatus);
-
-  return (
-    <div className="workspace page-stack detail-subpage batch-log-page">
-      <header className="subpage-toolbar">
-        <Button type="text" icon={<ArrowLeftOutlined />} onClick={onBack}>{t("common.back")}</Button>
-        <Text strong>{t("tasks.logTitle")}</Text>
-      </header>
-        <Space orientation="vertical" size={16} className="full-width">
-          <Segmented
-            block
-            value={logStatus}
-            onChange={(value) => setLogStatus(value as typeof logStatus)}
-            options={(["succeeded", "failed", "skipped"] as const).map((status) => ({
-              value: status,
-              label: t(`tasks.logStatus.${status}`, { count: counts[status] }),
-            }))}
-          />
-          {task.errorMessage ? <Text type="danger">{task.errorMessage}</Text> : null}
-          {visibleItems.length ? (
-            <div className="batch-log-list">
-              {visibleItems.map((item) => (
-                <div className="batch-log-item" key={item.itemId}>
-                  <div className="batch-log-copy">
-                    <Text strong ellipsis={{ tooltip: item.fileName }}>{item.fileName}</Text>
-                    <Text type="secondary" ellipsis={{ tooltip: item.songPath }}>{item.songPath}</Text>
-                  </div>
-                  <div className="batch-log-message">{item.errorMessage || t(`tasks.logResult.${item.status}`)}</div>
-                </div>
-              ))}
-            </div>
-          ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={loading ? t("tasks.loadingLog") : t("tasks.noLogItems")} />}
-        </Space>
+      <Text type="secondary">
+        {t("tasks.taskSummary", { current: task.current, total: task.total, success: task.successCount, skipped: task.skippedCount, failed: task.failureCount })}
+      </Text>
     </div>
   );
 }

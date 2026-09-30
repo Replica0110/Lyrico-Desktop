@@ -1,6 +1,7 @@
 {
   "sources": {
     "title": "Plugins",
+    "description": "Install and configure API v5 plugins for metadata, lyrics and artwork.",
     "install": "Install plugin",
     "installTitle": "Install plugin",
     "installConfirm": "Install",
@@ -22,6 +23,8 @@
     "priority": "Position {{value}}",
     "moveUp": "Raise priority",
     "moveDown": "Lower priority",
+    "installedAt": "Installed {{value}}",
+    "updatedAt": "Updated {{value}}",
     "types": {
       "aggregated": "All-in-one",
       "metadata": "Metadata",

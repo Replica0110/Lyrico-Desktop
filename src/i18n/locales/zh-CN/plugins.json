@@ -1,6 +1,7 @@
 {
   "sources": {
     "title": "插件",
+    "description": "安装并配置 API v5 插件，用于在线搜索标签、歌词和封面。",
     "install": "安装插件",
     "installTitle": "安装插件",
     "installConfirm": "安装",
@@ -22,6 +23,8 @@
     "priority": "第 {{value}} 位",
     "moveUp": "提高优先级",
     "moveDown": "降低优先级",
+    "installedAt": "安装于 {{value}}",
+    "updatedAt": "更新于 {{value}}",
     "types": {
       "aggregated": "综合",
       "metadata": "标签",
