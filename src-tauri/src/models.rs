@@ -35,6 +35,12 @@ pub(crate) struct AudioTrack {
     pub(crate) replay_gain_album_gain: String,
     pub(crate) replay_gain_album_peak: String,
     pub(crate) replay_gain_reference_loudness: String,
+    #[serde(default)]
+    pub(crate) modified_at: Option<u64>,
+    #[serde(default)]
+    pub(crate) added_at: Option<u64>,
+    #[serde(default)]
+    pub(crate) created_at: Option<u64>,
 }
 
 impl AudioTrack {
@@ -44,6 +50,13 @@ impl AudioTrack {
         self.cover_data_url = None;
         self
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CustomTag {
+    pub(crate) key: String,
+    pub(crate) values: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -213,6 +226,29 @@ pub(crate) struct TagUpdate {
     pub(crate) replay_gain_reference_loudness: String,
     pub(crate) cover_data_url: Option<String>,
     pub(crate) remove_cover: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LyricLineMatch {
+    pub(crate) path: String,
+    pub(crate) title: String,
+    pub(crate) artist: String,
+    pub(crate) matched_line: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AppLogEntry {
+    pub(crate) id: i64,
+    pub(crate) created_at: String,
+    pub(crate) level: String,
+    #[serde(rename = "type")]
+    pub(crate) log_type: String,
+    pub(crate) tag: String,
+    pub(crate) message: String,
+    pub(crate) detail: Option<String>,
+    pub(crate) related_id: Option<String>,
 }
 
 fn default_true() -> bool {
