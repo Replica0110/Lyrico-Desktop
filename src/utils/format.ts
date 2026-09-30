@@ -19,3 +19,34 @@ export function formatDateTime(value?: string, locale?: string) {
   }
   return new Date(value).toLocaleString(locale);
 }
+
+export function formatTimestamp(seconds?: number) {
+  if (!seconds) {
+    return "-";
+  }
+  const date = new Date(seconds * 1000);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+export function parseTimeValue(value?: string): number {
+  if (!value) {
+    return 0;
+  }
+  if (/^\d+$/.test(value)) {
+    return Number(value);
+  }
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : Math.floor(parsed / 1000);
+}
+
+export function formatTimeValue(value?: string, locale?: string) {
+  const seconds = parseTimeValue(value);
+  if (!seconds) {
+    return "-";
+  }
+  if (/^\d+$/.test(value ?? "")) {
+    return formatTimestamp(seconds);
+  }
+  return new Date(seconds * 1000).toLocaleString(locale);
+}

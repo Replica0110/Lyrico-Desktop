@@ -12,11 +12,12 @@ import {
   TagsOutlined,
   TeamOutlined,
 } from "@ant-design/icons";
-import { Badge, Button, Empty, Flex, Layout, Progress, Tooltip, Typography } from "antd";
-import { memo, useMemo, useState, type ReactNode } from "react";
+import { Badge, Button, Empty, Flex, Layout, Tooltip, Typography } from "antd";
+import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { AudioTrack, LibraryFolder, ReplayGainProgress, ScanProgress, ViewKey } from "../app/types";
 import { useReplayGainProgress } from "../hooks/useReplayGainProgress";
+import { useVirtualizedRows } from "../hooks/useVirtualizedRows";
 
 const { Sider, Content } = Layout;
 const { Text } = Typography;
@@ -50,6 +51,13 @@ export const Shell = memo(function Shell({
   const replayGainProgress = useReplayGainProgress();
   const [collapsed, setCollapsed] = useState(false);
   const [selectionPageOpen, setSelectionPageOpen] = useState(false);
+  const handleChangeView = useCallback((view: ViewKey) => {
+    setSelectionPageOpen(false);
+    onChangeView(view);
+  }, [onChangeView]);
+  useEffect(() => {
+    setSelectionPageOpen(false);
+  }, [activeView]);
   const navigationGroups = useMemo(() => [
     {
       label: t("nav.library"),
@@ -85,7 +93,7 @@ export const Shell = memo(function Shell({
             {!collapsed ? <Text className="side-nav-label" type="secondary">{group.label}</Text> : null}
             <div className="side-nav-items">
               {group.items.map((item) => <Tooltip key={item.key} title={collapsed ? item.label : undefined} placement="right">
-                <button className={`side-nav-item${activeView === item.key ? " is-active" : ""}`} type="button" onClick={() => onChangeView(item.key as ViewKey)}>
+                <button className={`side-nav-item${activeView === item.key ? " is-active" : ""}`} type="button" onClick={() => handleChangeView(item.key as ViewKey)}>
                   <span className="side-nav-icon">{item.icon}</span>
                   {!collapsed ? <span>{item.label}</span> : null}
                 </button>
@@ -106,7 +114,7 @@ export const Shell = memo(function Shell({
               aria-label={t("common.settings")}
               className={`side-action-button side-settings-button${activeView === "settings" ? " is-active" : ""}`}
               icon={<SettingOutlined />}
-              onClick={() => onChangeView("settings")}
+              onClick={() => handleChangeView("settings")}
             >
               {!collapsed && <span className="side-action-text">{t("common.settings")}</span>}
             </Button>
@@ -168,16 +176,30 @@ export const Shell = memo(function Shell({
 
 function SelectionPage({ tracks, onClose, onRemove, onClear, onOpenBatch }: { tracks: AudioTrack[]; onClose: () => void; onRemove: (path: string) => void; onClear: () => void; onOpenBatch: () => void }) {
   const { t } = useTranslation();
+  const {
+    rowsRef,
+    startIndex,
+    endIndex,
+    topSpacerHeight,
+    bottomSpacerHeight,
+  } = useVirtualizedRows(tracks.length, 58, 6);
+  const visibleTracks = tracks.slice(startIndex, endIndex);
   return (
     <div className="workspace page-stack detail-subpage selection-page">
       <header className="subpage-toolbar">
         <Button type="text" icon={<ArrowLeftOutlined />} onClick={onClose}>{t("common.back")}</Button>
         <Text strong>{t("selection.drawerTitle", { count: tracks.length })}</Text>
       </header>
-      {tracks.length ? <div className="selection-dialog-list">{tracks.map((track) => <div className="selection-dialog-row" key={track.path}>
-        <div className="track-title-cell"><Text strong ellipsis={{ tooltip: track.title || track.fileName }}>{track.title || track.fileName}</Text><Text type="secondary" ellipsis={{ tooltip: track.artist }}>{track.artist || t("common.unknownArtist")}</Text></div>
-        <Tooltip title={t("common.remove")}><Button type="text" danger aria-label={t("common.remove")} icon={<DeleteOutlined />} onClick={() => onRemove(track.path)} /></Tooltip>
-      </div>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("selection.empty")} />}
+      {tracks.length ? <div className="selection-dialog-list">
+        <div ref={rowsRef} className="selection-dialog-list-content">
+          {topSpacerHeight > 0 ? <div style={{ height: topSpacerHeight }} aria-hidden="true" /> : null}
+          {visibleTracks.map((track) => <div className="selection-dialog-row" key={track.path}>
+            <div className="track-title-cell"><Text strong ellipsis={{ tooltip: track.title || track.fileName }}>{track.title || track.fileName}</Text><Text type="secondary" ellipsis={{ tooltip: track.artist }}>{track.artist || t("common.unknownArtist")}</Text></div>
+            <Tooltip title={t("common.remove")}><Button type="text" danger aria-label={t("common.remove")} icon={<DeleteOutlined />} onClick={() => onRemove(track.path)} /></Tooltip>
+          </div>)}
+          {bottomSpacerHeight > 0 ? <div style={{ height: bottomSpacerHeight }} aria-hidden="true" /> : null}
+        </div>
+      </div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("selection.empty")} />}
       <footer className="selection-page-footer"><Flex justify="space-between" gap={12}><Button disabled={tracks.length === 0} onClick={onClear}>{t("selection.clear")}</Button><Button type="primary" disabled={tracks.length === 0} onClick={onOpenBatch}>{t("selection.batch")}</Button></Flex></footer>
     </div>
   );
@@ -193,7 +215,7 @@ function GlobalReplayGainProgress({ progress, onCancel }: { progress: ReplayGain
         <Text type="secondary">{progress.percent}%</Text>
         <Button size="small" danger onClick={onCancel}>{t("common.cancel")}</Button>
       </Flex>
-      <Progress percent={progress.percent} showInfo={false} size="small" status="active" />
+      <SideProgress percent={progress.percent} status="active" />
     </div>
   );
 }
@@ -214,12 +236,19 @@ function GlobalScanProgress({ progress }: { progress: ScanProgress }) {
         </Text>
         {progress.total > 0 && <Text type="secondary">{progress.current}/{progress.total}</Text>}
       </Flex>
-      <Progress
+      <SideProgress
         percent={percent}
-        showInfo={false}
-        size="small"
         status={progress.status === "failed" ? "exception" : progress.status === "completed" ? "success" : "active"}
       />
+    </div>
+  );
+}
+
+function SideProgress({ percent, status }: { percent: number; status: "active" | "success" | "exception" }) {
+  const value = Math.max(0, Math.min(100, percent));
+  return (
+    <div className={`side-progress is-${status}`} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(value)}>
+      <span className="side-progress-fill" style={{ width: `${value}%` }} />
     </div>
   );
 }
