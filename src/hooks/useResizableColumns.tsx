@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type ThHTMLAttributes } from "react";
+import { useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type ThHTMLAttributes } from "react";
 import type { TableColumnsType, TableColumnType } from "antd";
 
 export type BoundedColumn<T> = TableColumnType<T> & {
@@ -18,7 +18,7 @@ export function useResizableColumns<T>(source: BoundedColumn<T>[]) {
   const [widths, setWidths] = useState<Record<string, number>>(() => Object.fromEntries(
     source.map((column, index) => [columnId(column, index), numericWidth(column.width, column.minWidth ?? 80)]),
   ));
-  const columns = useMemo(() => source.map((column, index) => {
+  const columns = source.map((column, index) => {
     const id = columnId(column, index);
     const minWidth = column.minWidth ?? 64;
     const maxWidth = column.maxWidth ?? 720;
@@ -33,14 +33,12 @@ export function useResizableColumns<T>(source: BoundedColumn<T>[]) {
         onResize: (nextWidth: number) => setWidths((current) => ({ ...current, [id]: nextWidth })),
       }),
     };
-  }) as TableColumnsType<T>, [source, widths]);
+  }) as TableColumnsType<T>;
 
-  const components = useMemo(() => ({ header: { cell: ResizableHeaderCell } }), []);
-
-  return { columns, components };
+  return { columns, components: { header: { cell: ResizableHeaderCell } } };
 }
 
-const ResizableHeaderCell = memo(function ResizableHeaderCell({ width, minWidth = 64, maxWidth = 720, onResize, children, style, ...rest }: ResizableHeaderProps) {
+function ResizableHeaderCell({ width, minWidth = 64, maxWidth = 720, onResize, children, style, ...rest }: ResizableHeaderProps) {
   const startResize = (event: ReactPointerEvent<HTMLSpanElement>) => {
     if (!width || !onResize) return;
     event.preventDefault();
@@ -55,13 +53,30 @@ const ResizableHeaderCell = memo(function ResizableHeaderCell({ width, minWidth 
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", finish, { once: true });
   };
+  const resizeByKeyboard = (event: ReactKeyboardEvent<HTMLSpanElement>) => {
+    if (!width || !onResize) return;
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const step = event.shiftKey ? 40 : 8;
+    onResize(clamp(width + (event.key === "ArrowRight" ? step : -step), minWidth, maxWidth));
+  };
   return (
     <th {...rest} style={{ ...style, width, minWidth, maxWidth, position: "relative" }}>
       {children}
-      {onResize && <span className="column-resize-handle" onPointerDown={startResize} onClick={(event) => event.stopPropagation()} />}
+      {onResize && (
+        <span
+          className="column-resize-handle"
+          role="separator"
+          aria-orientation="vertical"
+          tabIndex={0}
+          onPointerDown={startResize}
+          onKeyDown={resizeByKeyboard}
+          onClick={(event) => event.stopPropagation()}
+        />
+      )}
     </th>
   );
-});
+}
 
 function columnId<T>(column: BoundedColumn<T>, index: number) {
   if (column.key != null) return String(column.key);

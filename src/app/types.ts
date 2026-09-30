@@ -39,6 +39,8 @@ export type AudioTrack = {
   replayGainAlbumGain: string;
   replayGainAlbumPeak: string;
   replayGainReferenceLoudness: string;
+  modifiedAt?: number;
+  createdAt?: number;
 };
 
 export type TagForm = {
@@ -64,6 +66,12 @@ export type TagForm = {
   replayGainReferenceLoudness: string;
   coverDataUrl?: string;
   removeCover: boolean;
+  customTags: CustomTag[];
+};
+
+export type CustomTag = {
+  key: string;
+  values: string[];
 };
 
 export type LibraryFolder = {
@@ -113,19 +121,28 @@ export type StorageInfo = {
 
 export type DesktopSettings = {
   searchPageSize: number;
-  replayGainTargetLoudness: number;
   lyricFormat: "plainLrc" | "verbatimLrc" | "enhancedLrc" | "ttml";
   lyricsConversionMode: "none" | "traditionalToSimplified" | "simplifiedToTraditional";
   showTranslation: boolean;
   showRomanization: boolean;
   onlyTranslationIfAvailable: boolean;
   removeEmptyLyricLines: boolean;
+  lyricLineOrder: LyricLineTrack[];
+  removeTagLineKeywords: string[];
+  ignoreShortAudio: boolean;
+  lyricIndexEnabled: boolean;
+  hiddenFolderPaths: string[];
+  artistPosterFolder: string;
   renameCharacterMappings: Record<string, string>;
-  theme: "light" | "dark" | "system";
+  themeMode: "system" | "light" | "dark";
+  replayGainTargetLoudness: number;
+  editFieldVisibility: Record<string, boolean>;
+  editFieldOrder: string[];
 };
 
+export type LyricLineTrack = "original" | "translation" | "romanization";
+
 export type PluginCapability = "searchSongs" | "getLyrics" | "searchCovers";
-export type PluginSourceKind = "aggregated" | "metadata" | "lyrics" | "covers";
 
 export type PluginConfigOption = {
   value: string;
@@ -157,12 +174,13 @@ export type SourcePlugin = {
   entry: string;
   includeDirs: string[];
   icon?: string;
+  enabled: boolean;
   capabilities: PluginCapability[];
   configFields: PluginConfigField[];
   pluginDir: string;
   iconPath?: string;
   iconDataUrl?: string;
-  sourceStates: Partial<Record<PluginSourceKind, { enabled: boolean; priority: number }>>;
+  sortOrder: number;
   installedAt: string;
   updatedAt: string;
   config: Record<string, string>;
@@ -177,24 +195,6 @@ export type PluginInstallFailure = {
 export type PluginInstallResult = {
   installed: SourcePlugin[];
   failed: PluginInstallFailure[];
-};
-
-export type PluginInstallPreviewCandidate = {
-  manifest: Pick<SourcePlugin, "id" | "name" | "versionCode" | "versionName" | "author" | "description" | "apiVersion" | "minHostApiVersion" | "capabilities">;
-  relativeRoot: string;
-  conflict: "new" | "update" | "overwrite" | "downgrade";
-  existingVersionName?: string;
-  iconDataUrl?: string;
-};
-
-export type PluginInstallPreview = {
-  candidates: PluginInstallPreviewCandidate[];
-  failed: PluginInstallFailure[];
-};
-
-export type PluginInstallDraft = {
-  archivePath: string;
-  preview: PluginInstallPreview;
 };
 
 export type PluginSongResult = {
@@ -217,7 +217,6 @@ export type PluginSongResult = {
   picUrl?: string;
   coverUrl?: string;
   artworkUrl?: string;
-  cover_url?: string;
   fields?: Record<string, unknown>;
   internal?: Record<string, unknown>;
 };

@@ -1,12 +1,39 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ArtistSplitConfig, AudioTrack, BatchTask, BatchTaskItem, CharacterMappingRule, DesktopSettings, LibraryFolder, PluginInstallPreview, PluginInstallResult, PluginSourceKind, RenamePreview, ReplayGainAnalysis, SourcePlugin, StorageInfo, TagForm } from "../app/types";
+import i18n from "../i18n";
+import type { ArtistSplitConfig, AudioTrack, BatchTask, BatchTaskItem, CharacterMappingRule, CustomTag, DesktopSettings, LibraryFolder, PluginInstallResult, RenamePreview, ReplayGainAnalysis, SourcePlugin, StorageInfo, TagForm } from "../app/types";
 
 export async function scanFolder(folderPath: string) {
   return invoke<AudioTrack[]>("scan_folder", { folderPath });
 }
 
+export type PickFilter = { name: string; extensions: string[] };
+
+export type PickOptions = {
+  title?: string;
+  filters?: PickFilter[];
+  multiple?: boolean;
+  directory?: boolean;
+  defaultPath?: string;
+};
+
+export async function pickPaths(options: PickOptions) {
+  return invoke<string[]>("pick_paths", { options });
+}
+
+export async function pickSavePath(options: PickOptions) {
+  return invoke<string | null>("pick_save_path", { options });
+}
+
 export async function readAudioFile(path: string) {
   return invoke<AudioTrack>("read_audio_file", { path });
+}
+
+export async function loadCustomTags(path: string) {
+  return invoke<CustomTag[]>("load_custom_tags", { path });
+}
+
+export async function saveCustomTags(path: string, tags: CustomTag[]) {
+  return invoke<void>("save_custom_tags", { path, tags });
 }
 
 export async function readImageFile(path: string) {
@@ -42,6 +69,10 @@ export async function loadLibraryTracks() {
   return invoke<AudioTrack[]>("load_library_tracks");
 }
 
+export async function loadLibraryTracksByPaths(paths: string[]) {
+  return invoke<AudioTrack[]>("load_library_tracks_by_paths", { paths });
+}
+
 export async function loadLibraryTrack(path: string) {
   return invoke<AudioTrack>("load_library_track", { path });
 }
@@ -71,6 +102,42 @@ export async function saveDesktopSettings(settings: DesktopSettings) {
   return invoke<void>("save_desktop_settings", { settings });
 }
 
+export type ThemeMode = "system" | "light" | "dark";
+
+export async function exportConfig(destination: string) {
+  return invoke<void>("export_config", { destination });
+}
+
+export async function importConfig(source: string) {
+  return invoke<DesktopSettings>("import_config", { source });
+}
+
+export type LyricLineMatch = {
+  path: string;
+  title: string;
+  artist: string;
+  matchedLine: string;
+};
+
+export async function searchLyricsLines(query: string, limit = 50) {
+  return invoke<LyricLineMatch[]>("search_lyrics_lines", { query, limit });
+}
+
+export type AppLogEntry = {
+  id: number;
+  createdAt: string;
+  level: string;
+  type: string;
+  tag: string;
+  message: string;
+  detail?: string | null;
+  relatedId?: string | null;
+};
+
+export async function loadAppLogs(level?: string, limit = 200) {
+  return invoke<AppLogEntry[]>("load_app_logs", { level: level ?? null, limit });
+}
+
 export async function upsertLibraryFolder(folder: LibraryFolder) {
   return invoke<void>("upsert_library_folder", { folder });
 }
@@ -83,8 +150,8 @@ export async function getStorageInfo() {
   return invoke<StorageInfo>("get_storage_info");
 }
 
-export async function analyzeReplayGain(path: string, jobId: string, targetLoudnessLufs: number) {
-  return invoke<ReplayGainAnalysis>("analyze_replay_gain", { path, jobId, targetLoudnessLufs });
+export async function analyzeReplayGain(path: string, jobId: string) {
+  return invoke<ReplayGainAnalysis>("analyze_replay_gain", { path, jobId });
 }
 
 export async function cancelReplayGain(jobId: string) {
@@ -97,6 +164,10 @@ export async function createBatchTask(taskType: string, songPaths: string[], con
 
 export async function loadBatchTasks() {
   return invoke<BatchTask[]>("load_batch_tasks");
+}
+
+export async function deleteBatchTasks(taskIds: string[]) {
+  return invoke<void>("delete_batch_tasks", { taskIds });
 }
 
 export async function loadBatchTaskItems(taskId: string) {
@@ -124,35 +195,31 @@ export async function retryFailedBatchItems(taskId: string, itemIds?: string[]) 
 }
 
 export async function loadSourcePlugins() {
-  return invoke<SourcePlugin[]>("load_source_plugins");
+  return invoke<SourcePlugin[]>("load_source_plugins", { locale: i18n.resolvedLanguage });
 }
 
-export async function previewSourcePluginArchive(archivePath: string) {
-  return invoke<PluginInstallPreview>("preview_source_plugin_archive", { archivePath });
+export async function installSourcePluginArchive(archivePath: string, allowDowngrade = false) {
+  return invoke<PluginInstallResult>("install_source_plugin_archive", { archivePath, allowDowngrade, locale: i18n.resolvedLanguage });
 }
 
-export async function installSourcePluginArchive(archivePath: string, selectedRoots: string[], allowDowngrade = false) {
-  return invoke<PluginInstallResult>("install_source_plugin_archive", { archivePath, selectedRoots, allowDowngrade });
+export async function setSourcePluginEnabled(pluginId: string, enabled: boolean) {
+  return invoke<SourcePlugin[]>("set_source_plugin_enabled", { pluginId, enabled, locale: i18n.resolvedLanguage });
 }
 
-export async function setPluginSourceEnabled(pluginId: string, sourceKind: PluginSourceKind, enabled: boolean) {
-  return invoke<SourcePlugin[]>("set_plugin_source_enabled", { pluginId, sourceKind, enabled });
-}
-
-export async function reorderPluginSources(sourceKind: PluginSourceKind, pluginIds: string[]) {
-  return invoke<SourcePlugin[]>("reorder_plugin_sources", { sourceKind, pluginIds });
+export async function setSourcePluginOrder(pluginIds: string[]) {
+  return invoke<SourcePlugin[]>("set_source_plugin_order", { pluginIds, locale: i18n.resolvedLanguage });
 }
 
 export async function saveSourcePluginSettings(pluginId: string, config: Record<string, string>) {
-  return invoke<SourcePlugin[]>("save_source_plugin_settings", { pluginId, config });
+  return invoke<SourcePlugin[]>("save_source_plugin_settings", { pluginId, config, locale: i18n.resolvedLanguage });
 }
 
 export async function uninstallSourcePlugin(pluginId: string) {
-  return invoke<SourcePlugin[]>("uninstall_source_plugin", { pluginId });
+  return invoke<SourcePlugin[]>("uninstall_source_plugin", { pluginId, locale: i18n.resolvedLanguage });
 }
 
 export async function invokeSourcePlugin<T>(pluginId: string, functionName: "searchSongs" | "getLyrics" | "searchCovers", request: unknown) {
-  return invoke<T>("invoke_source_plugin", { pluginId, functionName, request });
+  return invoke<T>("invoke_source_plugin", { pluginId, functionName, request, locale: i18n.resolvedLanguage });
 }
 
 export async function fetchRemoteImage(url: string, maxSize?: number) {

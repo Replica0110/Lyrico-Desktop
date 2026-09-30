@@ -29,7 +29,7 @@ export const TrackArtwork = memo(function TrackArtwork({ track, size, showDimens
     observer.observe(element);
     return () => observer.disconnect();
   }, [nearViewport, track?.coverDataUrl, track?.hasCover, track?.path]);
-  const lazyCover = useTrackCover(track?.path, nearViewport && Boolean(track?.hasCover), size >= 96);
+  const lazyCover = useTrackCover(track?.path, nearViewport && Boolean(track?.hasCover));
   const coverDataUrl = track?.coverDataUrl ?? lazyCover;
   const dimensions = useImageDimensions(showDimensions ? coverDataUrl : undefined);
 
