@@ -42,7 +42,7 @@ const dropAnimation: DropAnimation = {
   }),
 };
 
-/** Pure drop resolution: same math for the live draft and the final commit. */
+/** Resolve the destination once on drop; dnd-kit owns the live transforms. */
 export function resolveDropOrder(items: string[], active: string, over: string | null): string[] {
   if (!over || over === active) return items;
   const from = items.indexOf(active);
@@ -56,9 +56,10 @@ export function resolveDropOrder(items: string[], active: string, over: string |
  * webview, so this uses dnd-kit's own pointer + keyboard sensors with a
  * DragOverlay that follows the cursor.
  */
-export function SortableList({ items, onChange, label, renderItem, labelFor }: {
+export function SortableList({ items, onChange, label, renderItem, labelFor, disabled = false }: {
   items: string[]; onChange: (items: string[]) => void; label: string;
   renderItem: (key: string) => ReactNode; labelFor: (key: string) => string;
+  disabled?: boolean;
 }) {
   const { t } = useTranslation();
   const itemsRef = useRef(items);
@@ -66,10 +67,8 @@ export function SortableList({ items, onChange, label, renderItem, labelFor }: {
   itemsRef.current = items;
 
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<string[] | null>(null);
   const [liveMessage, setLiveMessage] = useState("");
   const activeIdRef = useRef<string | null>(null);
-  const draftRef = useRef<string[] | null>(null);
   const baselineRef = useRef<string[]>(items);
   const lastAnnounceRef = useRef<{ key: string; at: number } | null>(null);
 
@@ -82,12 +81,10 @@ export function SortableList({ items, onChange, label, renderItem, labelFor }: {
   useEffect(() => {
     if (activeIdRef.current === null) {
       baselineRef.current = itemsRef.current;
-      draftRef.current = null;
-      setDraft(null);
     }
   }, [itemKeys]);
 
-  const rendered = draft ?? items;
+  const rendered = items;
   const renderedRef = useRef(rendered);
   renderedRef.current = rendered;
   const activeKey = activeId && rendered.includes(activeId) ? activeId : null;
@@ -114,19 +111,13 @@ export function SortableList({ items, onChange, label, renderItem, labelFor }: {
     activeIdRef.current = id;
     const baseline = [...itemsRef.current];
     baselineRef.current = baseline;
-    draftRef.current = baseline;
-    setDraft(baseline);
     setActiveId(id);
   }
 
   function handleDragOver(event: DragOverEvent) {
     const active = String(event.active.id);
     const over = event.over ? String(event.over.id) : null;
-    const current = draftRef.current ?? itemsRef.current;
-    const next = resolveDropOrder(current, active, over);
-    if (next === current) return;
-    draftRef.current = next;
-    setDraft(next);
+    const next = resolveDropOrder(baselineRef.current, active, over);
     announce(active, next);
   }
 
@@ -134,15 +125,9 @@ export function SortableList({ items, onChange, label, renderItem, labelFor }: {
     const active = String(event.active.id);
     const over = event.over ? String(event.over.id) : null;
     const baseline = baselineRef.current;
-    const current = draftRef.current ?? baseline;
-    // Resolve from the drop target rather than the last onDragOver render:
-    // key events can queue several moves before React commits the draft.
-    const next = resolveDropOrder(current, active, over);
-
+    const next = resolveDropOrder(baseline, active, over);
     activeIdRef.current = null;
-    draftRef.current = null;
     setActiveId(null);
-    setDraft(null);
 
     // Commit once, on drop only: callers persist the order (Plugins writes to disk).
     const changed = next.length === baseline.length && next.some((key, index) => key !== baseline[index]);
@@ -154,9 +139,7 @@ export function SortableList({ items, onChange, label, renderItem, labelFor }: {
 
   function handleDragCancel() {
     activeIdRef.current = null;
-    draftRef.current = null;
     setActiveId(null);
-    setDraft(null);
   }
 
   const screenReaderInstructions: ScreenReaderInstructions = {
@@ -208,6 +191,7 @@ export function SortableList({ items, onChange, label, renderItem, labelFor }: {
             <SortableRow
               key={key}
               id={key}
+              disabled={disabled}
               dragging={activeKey === key}
               reorderLabel={t("common.reorderItem", { name: labelFor(key) })}
               reorderHint={t("common.reorderHint")}
@@ -219,7 +203,7 @@ export function SortableList({ items, onChange, label, renderItem, labelFor }: {
       </div>
       <DragOverlay dropAnimation={dropAnimation}>
         {activeKey
-          ? <div className="reorder-overlay">
+          ? <div className="reorder-overlay" inert aria-hidden="true">
             <span className="reorder-handle is-overlay" aria-hidden="true"><HolderOutlined /></span>
             <div className="reorder-content">{renderItem(activeKey)}</div>
           </div>
@@ -230,11 +214,12 @@ export function SortableList({ items, onChange, label, renderItem, labelFor }: {
   );
 }
 
-function SortableRow({ id, dragging, reorderLabel, reorderHint, children }: {
+function SortableRow({ id, dragging, reorderLabel, reorderHint, children, disabled }: {
   id: string; dragging: boolean;
+  disabled: boolean;
   reorderLabel: string; reorderHint: string; children: ReactNode;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id });
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition } = useSortable({ id, disabled });
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
     // dnd-kit hands out its own transition string while sorting/settling; keep it.
@@ -245,7 +230,9 @@ function SortableRow({ id, dragging, reorderLabel, reorderHint, children }: {
   return (
     <div ref={setNodeRef} style={style} className={`reorder-row${dragging ? " is-dragging" : ""}`}>
       <button
+        ref={setActivatorNodeRef}
         type="button"
+        disabled={disabled}
         className="reorder-handle"
         data-reorder-handle="true"
         aria-label={reorderLabel}

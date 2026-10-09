@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const DATABASE_SCHEMA_VERSION: u32 = 7;
+const DATABASE_SCHEMA_VERSION: u32 = 8;
 static NEXT_BATCH_ID: AtomicU64 = AtomicU64::new(1);
 const BATCH_TASK_TYPES: &[&str] = &[
     "matchMetadata",
@@ -220,9 +220,16 @@ impl Database {
     ) -> Result<(), String> {
         let column = plugin_source_column(source_kind, false)?;
         let connection = self.lock()?;
+        // Aggregated is a shortcut for every capability. Categories otherwise
+        // remain independent; the master flag only gates whether any can run.
+        let sql = if source_kind == "aggregated" {
+            "UPDATE source_plugins SET enabled = ?2, metadata_enabled = ?2, lyrics_enabled = ?2, cover_enabled = ?2, updated_at = ?3 WHERE id = ?1".to_string()
+        } else {
+            format!("UPDATE source_plugins SET {column} = ?2, enabled = CASE WHEN ?2 = 1 THEN 1 ELSE enabled END, updated_at = ?3 WHERE id = ?1")
+        };
         let changed = connection
             .execute(
-                &format!("UPDATE source_plugins SET {column} = ?2, updated_at = ?3 WHERE id = ?1"),
+                &sql,
                 params![plugin_id, i64::from(enabled), now().to_string()],
             )
             .map_err(|error| error.to_string())?;
@@ -290,7 +297,7 @@ impl Database {
         let connection = self.lock()?;
         let changed = connection
             .execute(
-                "UPDATE source_plugins SET enabled = ?2, updated_at = ?3 WHERE id = ?1",
+                "UPDATE source_plugins SET enabled = ?2, metadata_enabled = ?2, lyrics_enabled = ?2, cover_enabled = ?2, updated_at = ?3 WHERE id = ?1",
                 params![plugin_id, i64::from(enabled), now().to_string()],
             )
             .map_err(|error| error.to_string())?;
@@ -460,6 +467,7 @@ impl Database {
         scan_signature: &str,
     ) -> Result<HashMap<String, IndexedTrack>, String> {
         let connection = self.lock()?;
+        let folder_path = resolve_folder_path(&connection, folder_path)?;
         let stored_signature = connection
             .query_row(
                 "SELECT scan_signature FROM library_folders WHERE path = ?1",
@@ -516,6 +524,7 @@ impl Database {
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
+        let folder_path = resolve_folder_path(&transaction, folder_path)?;
         let previous_signature = transaction
             .query_row(
                 "SELECT scan_signature FROM library_folders WHERE path = ?1",
@@ -537,7 +546,7 @@ impl Database {
                 params![folder_path, tracks.len() as u32, scanned_at, scan_signature],
             )
             .map_err(|error| error.to_string())?;
-        let existing = load_folder_song_fingerprints(&transaction, folder_path)?;
+        let existing = load_folder_song_fingerprints(&transaction, &folder_path)?;
         let mut seen = std::collections::HashSet::with_capacity(tracks.len());
         for track in tracks {
             seen.insert(track.path.clone());
@@ -554,7 +563,7 @@ impl Database {
                     }
                 }
             }
-            upsert_track(&transaction, folder_path, track)?;
+            upsert_track(&transaction, &folder_path, track)?;
         }
         for path in existing.keys().filter(|path| !seen.contains(path.as_str())) {
             transaction
@@ -1166,6 +1175,7 @@ impl Database {
 
     pub(crate) async fn upsert_folder(&self, folder: LibraryFolder) -> Result<(), String> {
         let connection = self.lock()?;
+        let folder_path = resolve_folder_path(&connection, &folder.path)?;
         connection
             .execute(
                 "INSERT INTO library_folders (path, track_count, last_scanned_at, status, error)
@@ -1176,7 +1186,7 @@ impl Database {
                    status = excluded.status,
                    error = excluded.error",
                 params![
-                    folder.path,
+                    folder_path,
                     folder.track_count,
                     folder.last_scanned_at,
                     folder.status,
@@ -1192,6 +1202,7 @@ impl Database {
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
+        let path = resolve_folder_path(&transaction, path)?;
         transaction
             .execute("DELETE FROM songs WHERE folder_path = ?1", params![path])
             .map_err(|error| error.to_string())?;
@@ -1254,6 +1265,95 @@ fn batch_path_key(path: &str) -> String {
     } else {
         normalized.to_string()
     }
+}
+
+pub(crate) fn folder_path_key(path: &str) -> String {
+    batch_path_key(path.trim_end_matches(['/', '\\']))
+}
+
+/// Keep the first stored spelling while matching directory aliases under one lock.
+fn resolve_folder_path(connection: &Connection, path: &str) -> Result<String, String> {
+    let key = folder_path_key(path);
+    let mut statement = connection
+        .prepare("SELECT path FROM library_folders ORDER BY path")
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?;
+    for row in rows {
+        let stored = row.map_err(|error| error.to_string())?;
+        if folder_path_key(&stored) == key {
+            return Ok(stored);
+        }
+    }
+    Ok(path.to_string())
+}
+
+/// Move songs before deleting legacy duplicate parents, so FK cascade loses no songs.
+fn merge_legacy_folder_aliases(connection: &Connection) -> Result<(), String> {
+    let transaction = connection
+        .unchecked_transaction()
+        .map_err(|error| error.to_string())?;
+    let folders = {
+        let mut statement = transaction
+            .prepare("SELECT path FROM library_folders ORDER BY COALESCE(last_scanned_at, '') DESC, path")
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?
+    };
+    let mut canonical = HashMap::<String, String>::new();
+    let mut merged = std::collections::HashSet::<String>::new();
+    for path in folders {
+        let key = folder_path_key(&path);
+        if let Some(stored) = canonical.get(&key) {
+            transaction
+                .execute(
+                    "UPDATE songs SET folder_path = ?1 WHERE folder_path = ?2",
+                    params![stored, path],
+                )
+                .map_err(|error| error.to_string())?;
+            transaction
+                .execute("DELETE FROM library_folders WHERE path = ?1", params![path])
+                .map_err(|error| error.to_string())?;
+            merged.insert(stored.clone());
+        } else {
+            canonical.insert(key, path);
+        }
+    }
+    for folder in merged {
+        let songs = {
+            let mut statement = transaction.prepare(
+                "SELECT path FROM songs WHERE folder_path = ?1 ORDER BY CAST(updated_at AS INTEGER) DESC, path"
+            ).map_err(|error| error.to_string())?;
+            let rows = statement
+                .query_map(params![folder], |row| row.get::<_, String>(0))
+                .map_err(|error| error.to_string())?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|error| error.to_string())?
+        };
+        let mut unique = HashMap::<String, String>::new();
+        for path in songs {
+            if let Some(kept) = unique.get(&batch_path_key(&path)) {
+                transaction.execute(
+                    "UPDATE songs SET added_at = CASE WHEN added_at = 0 THEN (SELECT added_at FROM songs WHERE path = ?2)
+                     WHEN (SELECT added_at FROM songs WHERE path = ?2) > 0 THEN MIN(added_at, (SELECT added_at FROM songs WHERE path = ?2))
+                     ELSE added_at END WHERE path = ?1", params![kept, path]
+                ).map_err(|error| error.to_string())?;
+                transaction
+                    .execute("DELETE FROM songs WHERE path = ?1", params![path])
+                    .map_err(|error| error.to_string())?;
+            } else {
+                unique.insert(batch_path_key(&path), path);
+            }
+        }
+        transaction.execute(
+            "UPDATE library_folders SET track_count = (SELECT COUNT(*) FROM songs WHERE folder_path = ?1), scan_signature = '' WHERE path = ?1", params![folder]
+        ).map_err(|error| error.to_string())?;
+    }
+    transaction.commit().map_err(|error| error.to_string())
 }
 
 fn map_batch_task(row: &Row<'_>) -> rusqlite::Result<BatchTask> {
@@ -1380,6 +1480,9 @@ fn migrate_schema(connection: &Connection) -> Result<(), String> {
         connection
             .execute("UPDATE library_folders SET scan_signature = ''", [])
             .map_err(|error| error.to_string())?;
+    }
+    if previous_version < 8 {
+        merge_legacy_folder_aliases(connection)?;
     }
     connection
         .pragma_update(None, "user_version", DATABASE_SCHEMA_VERSION)
@@ -1776,6 +1879,111 @@ mod tests {
     }
 
     #[test]
+    fn folder_aliases_share_storage_scan_and_removal() {
+        tauri::async_runtime::block_on(async {
+            let database = Database::in_memory().await.unwrap();
+            database
+                .upsert_folder(LibraryFolder {
+                    path: "C:\\Music".into(),
+                    track_count: 0,
+                    last_scanned_at: None,
+                    status: "ready".into(),
+                    error: None,
+                })
+                .await
+                .unwrap();
+            let track = sample_track("C:\\Music\\one.flac", "one.flac");
+            database
+                .persist_folder_scan("C:/Music/", "test", &[track])
+                .await
+                .unwrap();
+            let folders = database.load_folders().await.unwrap();
+            assert_eq!(folders.len(), 1);
+            assert_eq!(folders[0].path, "C:\\Music");
+            assert_eq!(folders[0].track_count, 1);
+            assert_eq!(
+                database
+                    .load_folder_index("C:/Music/", "test")
+                    .await
+                    .unwrap()
+                    .len(),
+                1
+            );
+            database.remove_folder("C:/Music/").await.unwrap();
+            assert!(database.load_folders().await.unwrap().is_empty());
+            assert_eq!(
+                database
+                    .lock()
+                    .unwrap()
+                    .query_row("SELECT COUNT(*) FROM songs", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+        });
+    }
+
+    #[test]
+    fn migration_merges_folder_aliases_without_losing_unique_songs() {
+        tauri::async_runtime::block_on(async {
+            let database = Database::in_memory().await.unwrap();
+            let connection = database.lock().unwrap();
+            connection.execute_batch(
+                r"INSERT INTO library_folders (path, last_scanned_at, track_count) VALUES ('C:\Music', '1', 2), ('C:/Music/', '2', 2);
+                 INSERT INTO songs (id, path, folder_path, file_name, added_at, updated_at) VALUES
+                   ('old', 'C:\Music\same.flac', 'C:\Music', 'same.flac', 10, '1'),
+                   ('new', 'C:/Music/same.flac', 'C:/Music/', 'same.flac', 20, '2'),
+                   ('unique', 'C:\Music\unique.flac', 'C:\Music', 'unique.flac', 15, '1');
+                 PRAGMA user_version = 7;"
+            ).unwrap();
+            migrate_schema(&connection).unwrap();
+            assert_eq!(
+                connection
+                    .query_row("SELECT COUNT(*) FROM library_folders", [], |row| row
+                        .get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+            assert_eq!(
+                connection
+                    .query_row("SELECT track_count FROM library_folders", [], |row| row
+                        .get::<_, i64>(0))
+                    .unwrap(),
+                2
+            );
+            assert_eq!(
+                connection
+                    .query_row("SELECT COUNT(*) FROM songs", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                2
+            );
+            assert_eq!(
+                connection
+                    .query_row("SELECT added_at FROM songs WHERE id = 'new'", [], |row| row
+                        .get::<_, i64>(0))
+                    .unwrap(),
+                10
+            );
+            assert_eq!(
+                connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM songs WHERE folder_path = 'C:/Music/'",
+                        [],
+                        |row| row.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                2
+            );
+            migrate_schema(&connection).unwrap();
+            assert_eq!(
+                connection
+                    .query_row("SELECT COUNT(*) FROM songs", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                2
+            );
+        });
+    }
+
+    #[test]
     fn schema_and_basic_repository_round_trip() {
         tauri::async_runtime::block_on(async {
             let database = Database::in_memory()
@@ -1830,11 +2038,24 @@ mod tests {
                 .iter()
                 .find(|record| record.id == "com.example.two")
                 .unwrap();
+            assert!(one.enabled);
             assert!(one.lyrics_enabled);
             assert!(!one.metadata_enabled);
             assert_eq!(two.lyrics_sort_order, 0);
             assert_eq!(one.lyrics_sort_order, 1);
             assert_eq!(one.metadata_sort_order, 0);
+            database
+                .set_plugin_source_enabled("com.example.one", "lyrics", false)
+                .await
+                .unwrap();
+            let one = database
+                .load_plugin_record("com.example.one")
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(!one.lyrics_enabled);
+            assert!(!one.metadata_enabled);
+            assert!(!one.cover_enabled);
         });
     }
 
@@ -2108,7 +2329,17 @@ mod tests {
                 .await
                 .expect("task should start");
             assert_eq!(running.status, "running");
-            let partial = database.update_batch_task_item_result(&task.task_id, &items[0].item_id, "running", 0.5, None, None).await.unwrap();
+            let partial = database
+                .update_batch_task_item_result(
+                    &task.task_id,
+                    &items[0].item_id,
+                    "running",
+                    0.5,
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
             assert_eq!(partial.current, 0);
             assert_eq!(partial.progress, 0.25);
             let after_success = database

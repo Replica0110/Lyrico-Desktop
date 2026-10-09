@@ -679,9 +679,7 @@ fn source_from_record(
         manifest.capabilities.iter().map(String::as_str).collect()
     };
     let supports = |capability: &str| capabilities.contains(&capability);
-    let has_explicit_source_flags =
-        record.metadata_enabled || record.lyrics_enabled || record.cover_enabled;
-    let source_enabled = |flag: bool| record.enabled && (flag || !has_explicit_source_flags);
+    let source_enabled = |flag: bool| record.enabled && flag;
     let mut source_states = BTreeMap::new();
     if ["searchSongs", "getLyrics", "searchCovers"]
         .iter()
@@ -690,7 +688,10 @@ fn source_from_record(
         source_states.insert(
             "aggregated".to_string(),
             PluginSourceState {
-                enabled: record.enabled,
+                enabled: record.enabled
+                    && record.metadata_enabled
+                    && record.lyrics_enabled
+                    && record.cover_enabled,
                 priority: record.sort_order,
             },
         );
@@ -868,7 +869,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_master_switch_drives_source_states_until_a_category_is_configured() {
+    fn source_states_preserve_disabled_categories_even_when_all_are_off() {
         let manifest = PluginManifest {
             id: "com.example.legacy".to_string(),
             name: "Legacy".to_string(),
@@ -905,7 +906,8 @@ mod tests {
             source_from_record(record(true, false, false), Path::new("C:/plugins"), None).unwrap();
         assert!(enabled.enabled);
         assert_eq!(enabled.sort_order, 3);
-        assert!(enabled.source_state("metadata").unwrap().enabled);
+        assert!(!enabled.source_state("metadata").unwrap().enabled);
+        assert!(!enabled.is_enabled_anywhere());
 
         let disabled =
             source_from_record(record(false, false, false), Path::new("C:/plugins"), None).unwrap();

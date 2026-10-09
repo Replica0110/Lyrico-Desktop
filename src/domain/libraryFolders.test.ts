@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AudioTrack, LibraryFolder } from "../app/types";
 import { buildLibraryFolderTree, tracksInDirectory } from "./library";
+import { deduplicateFolders, folderPathKey, upsertFolder } from "./libraryFolders";
 
 describe("library folder view", () => {
   const folder: LibraryFolder = { path: "E:\\Music", trackCount: 3, status: "ready" };
@@ -58,3 +59,26 @@ function track(path: string): AudioTrack {
     replayGainReferenceLoudness: "",
   };
 }
+
+const folder = (path: string, lastScannedAt?: string): LibraryFolder => ({ path, lastScannedAt, trackCount: 1, status: "ready" });
+
+describe("library folder identity", () => {
+  it("matches picker slash, case, and trailing separator variants", () => {
+    expect(folderPathKey("D:\\Music\\")).toBe(folderPathKey("d:/music/"));
+    expect(folderPathKey("D:/MusicOther")).not.toBe(folderPathKey("D:/Music"));
+  });
+
+  it("keeps the latest scanned record while repairing a stored list", () => {
+    const latest = folder("d:/Music/", "2026-10-09T12:00:00Z");
+    expect(deduplicateFolders([folder("D:\\Music", "2026-10-08T12:00:00Z"), latest])).toEqual([latest]);
+    expect(upsertFolder([folder("D:\\Music"), latest], folder("D:/Music", "2026-10-10"))).toHaveLength(1);
+  });
+
+  it("renders one root and counts a song once even for legacy IPC aliases", () => {
+    const tracks = ["D:\\Music\\song.flac", "d:/music/song.flac"].map((path) => ({ path }) as AudioTrack);
+    const roots = buildLibraryFolderTree([folder("D:\\Music"), folder("D:/Music/")], tracks);
+    expect(roots).toHaveLength(1);
+    expect(roots[0].directTrackCount).toBe(1);
+    expect(roots[0].totalTrackCount).toBe(1);
+  });
+});

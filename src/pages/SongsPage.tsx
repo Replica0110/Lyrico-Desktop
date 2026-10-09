@@ -4,7 +4,6 @@ import { memo, useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AudioTrack } from "../app/types";
 import { EmptyState } from "../components/EmptyState";
-import { LibrarySelectionToolbar } from "../components/LibrarySelectionToolbar";
 import { LibraryTable } from "../components/LibraryTable";
 import { PageHeader } from "../components/PageHeader";
 import { SortSelect } from "../components/SortSelect";
@@ -18,7 +17,6 @@ export const SongsPage = memo(function SongsPage({
   onChangeQuery,
   onChangeSelectedPaths,
   onOpenDetails,
-  onOpenBatch,
   onAddFolders,
 }: {
   tracks: AudioTrack[];
@@ -28,17 +26,11 @@ export const SongsPage = memo(function SongsPage({
   onChangeQuery: (query: string) => void;
   onChangeSelectedPaths: (paths: string[]) => void;
   onOpenDetails: (path?: string) => void;
-  onOpenBatch: () => void;
   onAddFolders: () => void;
 }) {
   const { t } = useTranslation();
   const [sort, setSort] = useState<SortState<TrackSortField>>();
   const handleOpenTrack = useCallback((track: AudioTrack) => onOpenDetails(track.path), [onOpenDetails]);
-  const clearSelection = useCallback(() => onChangeSelectedPaths([]), [onChangeSelectedPaths]);
-  const selectAll = useCallback(
-    () => onChangeSelectedPaths(tracks.map((track) => track.path)),
-    [onChangeSelectedPaths, tracks],
-  );
   const searching = query.trim().length > 0;
   const empty = tracks.length === 0 && !loading;
   const addFolderAction = useMemo(
@@ -68,16 +60,7 @@ export const SongsPage = memo(function SongsPage({
           {/* The empty state already offers this action; showing it twice on one screen is noise. */}
           {empty && !searching ? null : addFolderAction}
         </>}
-      >
-        {selectedPaths.length > 0 ? (
-          <LibrarySelectionToolbar
-            selectedCount={selectedPaths.length}
-            onOpenBatch={onOpenBatch}
-            onClear={clearSelection}
-            onSelectAll={selectAll}
-          />
-        ) : null}
-      </PageHeader>
+      />
 
       <div className="page-body">
         {empty ? (

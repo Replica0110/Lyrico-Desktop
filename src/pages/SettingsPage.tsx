@@ -309,7 +309,7 @@ function EditFieldOrderEditor({ settings, onChange }: { settings: DesktopSetting
         }}
       />
 
-      <Modal
+      <Modal centered
         open={Boolean(composite)}
         title={t("settings.replayGain")}
         footer={null}

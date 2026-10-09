@@ -22,7 +22,7 @@
 /* One bordered container, two columns: rail + detail, split by a 1px line. */
 .plugin-layout {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-columns: 320px minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   gap: 0;
   flex: 1 1 auto;
@@ -48,36 +48,65 @@
   padding: 4px;
 }
 
-/* List row: icon + two text lines (name, capability summary), never wraps. */
+/* Density contract: 60px sortable row; 24px handle, 28px icon, two text
+   lines, small switch and 24px delete action. One row owns selection/hover. */
+.plugin-list-panel .reorder-row {
+  min-height: 60px;
+  gap: 4px;
+  padding-inline: 4px;
+}
+.plugin-list-panel .reorder-row:has(.plugin-item.is-active) {
+  background: var(--ant-color-primary-bg);
+}
+.plugin-list-panel .reorder-row:hover { background: var(--hover-bg); }
+.plugin-list-panel .reorder-row:has(.plugin-item.is-active):hover {
+  background: var(--ant-color-primary-bg);
+}
+.plugin-list-panel .reorder-handle {
+  flex-basis: 24px;
+  width: 24px;
+  background: transparent;
+}
+.plugin-list-panel .reorder-content { padding: 0; }
+
 .plugin-item {
   display: flex;
   align-items: center;
-  gap: var(--list-gap);
+  gap: 8px;
   width: 100%;
   min-width: 0;
-  padding: 2px 6px;
-  border: 0;
-  border-radius: var(--surface-radius);
-  background: transparent;
+  min-height: 59px;
+  padding: 6px 4px;
   color: var(--text-primary);
+}
+
+.plugin-item-select {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
-
-.plugin-item:hover {
-  background: var(--hover-bg);
-}
-
-.plugin-item.is-active {
-  color: var(--ant-color-primary);
-  background: var(--ant-color-primary-bg);
-}
-
-.plugin-item:focus-visible {
+.plugin-item-select:disabled { cursor: default; }
+.plugin-item-select:focus-visible {
   outline: 2px solid var(--ant-color-primary);
-  outline-offset: -2px;
+  outline-offset: 2px;
 }
+
+.plugin-item-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+.plugin-item-actions .ant-btn { width: 24px; height: 24px; }
 
 .plugin-item .ant-avatar {
   flex: 0 0 auto;
@@ -97,7 +126,7 @@
   overflow: hidden;
   font-size: 13px;
   font-weight: 600;
-  line-height: 1.2;
+  line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -106,8 +135,8 @@
   min-width: 0;
   overflow: hidden;
   color: var(--text-tertiary);
-  font-size: 12px;
-  line-height: 1.2;
+  font-size: 11px;
+  line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -147,7 +176,7 @@
 
 .plugin-detail-name {
   min-width: 0;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   overflow: hidden;
   font-size: 13px;
   font-weight: 600;
@@ -158,14 +187,6 @@
 .plugin-version {
   flex: 0 0 auto;
   margin: 0;
-}
-
-.plugin-detail-actions {
-  display: flex;
-  flex: 0 0 auto;
-  margin-inline-start: auto;
-  align-items: center;
-  gap: var(--list-gap);
 }
 
 .plugin-detail-body {
@@ -229,18 +250,10 @@
   width: 100%;
 }
 
-/* Save stays reachable: pinned to the bottom of .plugin-detail-body, which is
-   the scrollport (.plugin-detail-body has overflow: auto and no ancestor between
-   it and the footer clips or scrolls). */
-.plugin-config-footer {
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
-  display: flex;
-  justify-content: flex-end;
-  padding: 8px 0;
-  border-top: 1px solid var(--border-color);
-  background: var(--bg-secondary);
+/* Header action stays outside the scrolling body and never covers fields. */
+.plugin-config-save {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
 }
 
 .plugin-manifest {
@@ -296,16 +309,10 @@
   color: var(--ant-color-primary);
 }
 
-/* Narrow windows: shrink the rail instead of overflowing the page, drop the
-   capability line, and wrap text instead of cutting it off (docs/ui-layout.md
-   line 220: the plugin name must stay readable). */
+/* Preserve controls and wrap names as the rail narrows. */
 @media (max-width: 900px) {
   .plugin-layout {
-    grid-template-columns: 208px minmax(0, 1fr);
-  }
-
-  .plugin-item-meta {
-    display: none;
+    grid-template-columns: 280px minmax(0, 1fr);
   }
 
   /* Rail name: up to two full lines, never a horizontal ellipsis. */
@@ -318,8 +325,7 @@
     -webkit-line-clamp: 2;
   }
 
-  /* Detail header: the actions take a row of their own so the name keeps the
-     width of the first row. */
+  /* Long names can wrap independently of the version. */
   .plugin-detail-header {
     flex-wrap: wrap;
     row-gap: 4px;
@@ -330,22 +336,12 @@
     flex: 1 1 auto;
   }
 
-  .plugin-detail-actions {
-    flex: 1 1 100%;
-    margin-inline-start: 0;
-    justify-content: flex-end;
-  }
+
 }
 
 @media (max-width: 780px) {
   .plugin-layout {
-    grid-template-columns: 168px minmax(0, 1fr);
-  }
-
-  /* Tighten the row so a one-word plugin name still fits the rail. */
-  .plugin-item {
-    gap: 6px;
-    padding: 2px 4px;
+    grid-template-columns: 250px minmax(0, 1fr);
   }
 
   .plugin-detail-header {
@@ -356,3 +352,14 @@
     padding: 8px 12px 12px;
   }
 }
+
+.plugin-source-tabs .ant-tabs-nav { margin: 0 0 8px; }
+.plugin-source-tabs .ant-tabs-nav-list { width: 100%; }
+.plugin-source-tabs .ant-tabs-tab {
+  flex: 1;
+  justify-content: center;
+  min-height: 48px;
+  padding: 12px 4px;
+  font-size: 14px;
+}
+.plugin-source-tabs .ant-tabs-tab + .ant-tabs-tab { margin-inline-start: 0; }

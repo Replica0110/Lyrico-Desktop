@@ -89,6 +89,18 @@ describe("utility layout contract", () => {
     expect(artists).toContain("selectionMode");
   });
 
+  it("keeps selection controls in the table and selected-song page without duplicate toolbars", () => {
+    for (const [name, source] of Object.entries({ songs, folders, albums, artists })) {
+      expect(source, name).not.toContain("LibrarySelectionToolbar");
+    }
+    expect(css).not.toContain(".selection-bar");
+    const selectedPage = shell.slice(shell.indexOf("function SelectionPage"), shell.indexOf("function GlobalReplayGainProgress"));
+    expect(selectedPage).toContain("<PageHeader");
+    expect(selectedPage).not.toContain("<SubPageBar");
+    expect(selectedPage).not.toContain("selection.batch");
+    expect(shell).toContain('aria-current={selectionPageOpen ? "page" : undefined}');
+  });
+
   it("keeps drag reordering on one shared dnd-kit implementation", () => {
     expect(sortableList).toContain("@dnd-kit/core");
     expect(sortableList).toContain("@dnd-kit/sortable");

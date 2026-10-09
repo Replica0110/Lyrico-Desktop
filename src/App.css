@@ -1,5 +1,6 @@
 :root {
   --nav-width: 176px;
+  --titlebar-height: 36px;
   --nav-collapsed-width: 56px;
   --page-padding: 16px;
   --section-gap: 12px;
@@ -160,7 +161,7 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 36px;
+  height: var(--titlebar-height);
   flex: 0 0 auto;
   padding: 0 4px 0 16px;
   background: var(--titlebar-bg);
@@ -216,9 +217,8 @@ textarea {
 }
 
 .global-scan-progress {
-  flex: 0 0 auto;
-  padding: 8px 20px 4px;
-  border-bottom: 1px solid var(--border-color);
+  width: min(440px, calc(100vw - 64px));
+  padding: 4px;
   background: var(--bg-secondary);
 }
 
@@ -342,7 +342,8 @@ textarea {
   border-radius: var(--surface-radius);
 }
 
-.side-settings-button.is-active {
+.side-settings-button.is-active,
+.side-selection-button.is-active {
   color: var(--ant-color-primary);
   background: var(--ant-color-primary-bg);
 }
@@ -670,22 +671,6 @@ textarea {
 .detail-heading-facts {
   display: flex;
   gap: var(--section-gap);
-  font-variant-numeric: tabular-nums;
-}
-
-/* Selection bar: appears only when the selection holds data. */.selection-bar {
-  display: flex;
-  min-height: var(--bar-height);
-  padding: 6px var(--page-padding);
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--list-gap);
-  flex-wrap: wrap;
-  border-bottom: 1px solid var(--border-color);
-  background: var(--ant-color-primary-bg);
-}
-
-.selection-bar-count {
   font-variant-numeric: tabular-nums;
 }
 
@@ -1663,7 +1648,16 @@ html[data-theme="dark"] .app-content {
   flex: 1;
   flex-direction: column;
 }
-.app-statusbar { display: flex; justify-content: space-between; gap: 12px; flex: 0 0 auto; min-height: 26px; padding: 3px var(--page-padding); border-top: 1px solid var(--border-color); background: var(--bg-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.app-statusbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: 0 0 30px; height: 30px; min-width: 0; padding: 3px var(--page-padding); border-top: 1px solid var(--border-color); background: var(--bg-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.statusbar-activities { display: flex; gap: 8px; min-width: 0; }
+.app-statusbar > .ant-typography { min-width: 0; flex: 1; }
+.activity-task { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.activity-task-list { max-height: min(300px, calc(100vh - 180px)); overflow-y: auto; }
+.statusbar-activity { display: flex; align-items: center; gap: 6px; padding: 0 4px; height: 24px; border: 0; background: transparent; color: var(--text-primary); cursor: pointer; font-size: 12px; white-space: nowrap; }
+.statusbar-activity:hover { background: var(--hover-bg); }
+.statusbar-activity .progress-bar { width: 72px; height: 4px; flex: 0 0 auto; }
+.statusbar-activity:focus-visible { outline: 2px solid var(--ant-color-primary); }
+@media (max-width: 800px) { .statusbar-activity .progress-bar { display: none; } }
 .side-nav-item:focus-visible { outline: 2px solid var(--ant-color-primary); outline-offset: -2px; }
 .collection-meta { display: flex; justify-content: space-between; gap: 8px; }
 @media (max-width: 900px) {

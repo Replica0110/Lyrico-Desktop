@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import i18n from "../i18n";
-import type { ArtistSplitConfig, AudioTrack, BatchTask, BatchTaskItem, CharacterMappingRule, CustomTag, DesktopSettings, LibraryFolder, PluginInstallResult, RenamePreview, ReplayGainAnalysis, SourcePlugin, StorageInfo, TagForm } from "../app/types";
+import type { ArtistSplitConfig, AudioTrack, BatchTask, BatchTaskItem, CharacterMappingRule, CustomTag, DesktopSettings, LibraryFolder, PluginInstallResult, RenamePreview, ReplayGainAnalysis, PluginSourceKind, SourcePlugin, StorageInfo, TagForm } from "../app/types";
 
 export async function scanFolder(folderPath: string) {
   return invoke<AudioTrack[]>("scan_folder", { folderPath });
@@ -220,4 +220,12 @@ export async function invokeSourcePlugin<T>(pluginId: string, functionName: "sea
 
 export async function fetchRemoteImage(url: string, maxSize?: number) {
   return invoke<string>("fetch_remote_image", { url, maxSize });
+}
+
+export async function reorderPluginSources(sourceKind: PluginSourceKind, pluginIds: string[]) {
+  return invoke<SourcePlugin[]>("reorder_plugin_sources", { sourceKind, pluginIds, locale: i18n.resolvedLanguage });
+}
+
+export async function setPluginSourceEnabled(pluginId: string, sourceKind: PluginSourceKind, enabled: boolean) {
+  return invoke<SourcePlugin[]>("set_plugin_source_enabled", { pluginId, sourceKind, enabled, locale: i18n.resolvedLanguage });
 }

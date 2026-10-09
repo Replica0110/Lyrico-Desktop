@@ -1,3 +1,4 @@
+import { enabledPluginSources } from "../data/pluginSources";
 import {
   CalculatorOutlined,
   DeleteOutlined,
@@ -10,7 +11,7 @@ import {
   TagsOutlined,
 } from "@ant-design/icons";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { App, Button, Checkbox, Flex, Input, InputNumber, Modal, Popconfirm, Progress, Rate, Select, Space, Table, Tag, Tooltip, Typography, type TableColumnsType } from "antd";
+import { App, Button, Checkbox, Flex, Input, InputNumber, Modal, Progress, Rate, Select, Space, Table, Tag, Tooltip, Typography, type TableColumnsType } from "antd";
 import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 import type { AudioTrack, BatchTask, CharacterMappingRule, DesktopSettings, RenamePreview, SourcePlugin } from "../app/types";
@@ -635,6 +636,7 @@ function TaskHistory({
   onDelete: (task: BatchTask) => void;
 }) {
   const { t } = useTranslation();
+  const { modal } = App.useApp();
   const columns: TableColumnsType<BatchTask> = [
     { title: t("tasks.historyType"), dataIndex: "taskType", width: 150 },
     {
@@ -671,9 +673,11 @@ function TaskHistory({
             <Button size="small" onClick={() => onRetry(task)}>{t("tasks.historyRetry")}</Button>
           ) : null}
           {!isActiveTask(task) ? (
-            <Popconfirm title={t("tasks.historyDeleteConfirm")} onConfirm={() => onDelete(task)}>
-              <Button size="small" danger>{t("common.delete")}</Button>
-            </Popconfirm>
+            <Button size="small" danger onClick={() => modal.confirm({
+              centered: true, title: t("tasks.historyDeleteConfirm"),
+              okText: t("common.delete"), cancelText: t("common.cancel"),
+              okButtonProps: { danger: true }, onOk: () => onDelete(task),
+            })}>{t("common.delete")}</Button>
           ) : null}
         </Space>
       ),
@@ -712,6 +716,7 @@ function DeleteFilesPanel({
   onCancel: () => void;
 }) {
   const { t } = useTranslation();
+  const { modal } = App.useApp();
   const columns: TableColumnsType<AudioTrack> = [
     {
       title: t("table.track"),
@@ -737,11 +742,11 @@ function DeleteFilesPanel({
         {isActiveTask(task) ? (
           <Button danger onClick={onCancel}>{t("common.cancel")}</Button>
         ) : (
-          <Popconfirm title={t("tasks.deleteConfirm")} onConfirm={onRun} okButtonProps={{ danger: true }}>
-            <Button danger type="primary" icon={<DeleteOutlined />} loading={submitting} disabled={tracks.length === 0}>
-              {t("tasks.startDelete")}
-            </Button>
-          </Popconfirm>
+          <Button danger type="primary" icon={<DeleteOutlined />} loading={submitting} disabled={tracks.length === 0} onClick={() => modal.confirm({
+            centered: true, title: t("tasks.deleteConfirm"), content: t("tasks.deleteWarning"),
+            okText: t("tasks.startDelete"), cancelText: t("common.cancel"),
+            okButtonProps: { danger: true }, onOk: onRun,
+          })}>{t("tasks.startDelete")}</Button>
         )}
       </footer>
     </section>
@@ -750,7 +755,7 @@ function DeleteFilesPanel({
 
 function MetadataMatchPanel({ tracks, plugins, matchMode, task, submitting, onRun, onCancel }: { tracks: AudioTrack[]; plugins: SourcePlugin[]; matchMode: BatchMatchMode; task?: BatchTask; submitting: boolean; onRun: (config: MetadataMatchConfig) => void; onCancel: () => void }) {
   const { t } = useTranslation();
-  const availableSources = useMemo(() => plugins.filter((plugin) => plugin.enabled && plugin.capabilities.includes("searchSongs")), [plugins]);
+  const availableSources = useMemo(() => enabledPluginSources(plugins, "metadata"), [plugins]);
   const [enabledSources, setEnabledSources] = useState<string[]>(availableSources.map((plugin) => plugin.id));
   const [targetModes, setTargetModes] = useState<Record<string, MetadataWriteMode>>(() => buildMatchTargetModes(matchMode));
   const [preferFileName, setPreferFileName] = useState(false);
@@ -844,7 +849,7 @@ function MetadataMatchPanel({ tracks, plugins, matchMode, task, submitting, onRu
           </Button>
         )}
       </footer>
-      <Modal title={t("tasks.matchFields")} open={settingsOpen} onCancel={() => setSettingsOpen(false)} onOk={() => setSettingsOpen(false)} destroyOnHidden>
+      <Modal centered title={t("tasks.matchFields")} open={settingsOpen} onCancel={() => setSettingsOpen(false)} onOk={() => setSettingsOpen(false)} destroyOnHidden>
         <Table
           rowKey="key"
           size="small"
@@ -980,7 +985,7 @@ function EditTagsPanel({ tracks, task, submitting, onRun, onCancel }: { tracks: 
           <Button type="primary" icon={<EditOutlined />} loading={submitting} disabled={tracks.length === 0 || !hasOperation} onClick={run}>{t("tasks.startEditTags")}</Button>
         )}
       </footer>
-      <Modal title={t("tasks.editFields")} open={settingsOpen} width={760} onCancel={() => setSettingsOpen(false)} onOk={() => setSettingsOpen(false)} destroyOnHidden>
+      <Modal centered title={t("tasks.editFields")} open={settingsOpen} width={760} onCancel={() => setSettingsOpen(false)} onOk={() => setSettingsOpen(false)} destroyOnHidden>
         <Space orientation="vertical" size={12} className="full-width batch-edit-fields">
           <Text type="secondary">{t("tasks.editEmptyHint")}</Text>
           {batchEditFields.map(([field, label, inputType]) => (
@@ -1154,7 +1159,7 @@ function RenameFilesPanel({ tracks, task, submitting, onRun, onCancel, character
           <Button type="primary" icon={<FormOutlined />} loading={submitting} disabled={!canRun} onClick={run}>{t("tasks.startRename")}</Button>
         )}
       </footer>
-      <Modal title={t("tasks.characterMappings")} open={settingsOpen} onCancel={() => setSettingsOpen(false)} onOk={() => setSettingsOpen(false)} destroyOnHidden>
+      <Modal centered title={t("tasks.characterMappings")} open={settingsOpen} onCancel={() => setSettingsOpen(false)} onOk={() => setSettingsOpen(false)} destroyOnHidden>
         <Space orientation="vertical" size={12} className="full-width">
           <Text type="secondary">{t("tasks.characterMappingsHint")}</Text>
           <div className="rename-mapping-list">

@@ -1,0 +1,35 @@
+/* Ant Design virtual rows use flex cells, rather than table td elements. */
+.library-track-list .ant-table-tbody-virtual .library-selection-cell {
+  display: flex;
+  align-items: center;
+}
+
+.library-track-list .ant-table-cell.library-selection-cell {
+  justify-content: center;
+  vertical-align: middle;
+}
+
+.library-track-list .library-selection-cell .ant-checkbox-wrapper {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+}
+
+.library-track-list .ant-table-thead .library-selection-cell .ant-checkbox-wrapper {
+  display: flex;
+  width: fit-content;
+  margin-inline: auto;
+}
+
+.library-track-list .library-selection-cell .ant-checkbox {
+  top: 0;
+}
+
+.library-track-list .ant-table-tbody-virtual .is-selected .ant-table-cell {
+  background: color-mix(in srgb, var(--ant-color-primary-bg) 70%, transparent);
+}
+
+.library-track-list .ant-table-tbody-virtual .ant-table-row:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: -2px;
+}

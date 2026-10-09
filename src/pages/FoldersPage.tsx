@@ -7,12 +7,11 @@ import {
   ReloadOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
-import { Alert, Button, Input, Popconfirm, Tooltip } from "antd";
+import { Alert, App, Button, Input, Tooltip } from "antd";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AudioTrack, LibraryFolder } from "../app/types";
 import { EmptyState } from "../components/EmptyState";
-import { LibrarySelectionToolbar } from "../components/LibrarySelectionToolbar";
 import { LibraryTable } from "../components/LibraryTable";
 import { PageHeader } from "../components/PageHeader";
 import { SortSelect } from "../components/SortSelect";
@@ -20,6 +19,7 @@ import { SubPageBar } from "../components/SubPageBar";
 import { buildLibraryFolderTree, filterTracks, tracksInDirectory, type LibraryFolderNode } from "../domain/library";
 import { folderSortFields, sortFoldersBy, type FolderSortField, type SortState } from "../domain/sort";
 import "./FoldersPage.css";
+import { formatTimeValue } from "../utils/format";
 
 /**
  * Folders: the library root list, and the folder contents as a second-level page.
@@ -40,7 +40,6 @@ export const FoldersPage = memo(function FoldersPage({
   onOpenTrack,
   selectedPaths,
   onChangeSelectedPaths,
-  onOpenBatch,
 }: {
   folders: LibraryFolder[];
   tracks: AudioTrack[];
@@ -54,9 +53,9 @@ export const FoldersPage = memo(function FoldersPage({
   onOpenTrack: (path: string) => void;
   selectedPaths: string[];
   onChangeSelectedPaths: (paths: string[]) => void;
-  onOpenBatch: () => void;
 }) {
   const { t } = useTranslation();
+  const { modal } = App.useApp();
   const [folderSort, setFolderSort] = useState<SortState<FolderSortField>>();
   const [currentKey, setCurrentKey] = useState<string>();
   const [query, setQuery] = useState("");
@@ -104,6 +103,18 @@ export const FoldersPage = memo(function FoldersPage({
     onSelectFolder(undefined);
   }
 
+  function confirmRemove(node: LibraryFolderNode) {
+    modal.confirm({
+      centered: true,
+      title: t("folders.remove"),
+      content: t("folders.removeConfirm", { name: node.name }),
+      okText: t("common.remove"),
+      cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
+      onOk: () => onRemoveFolder(node.rootPath),
+    });
+  }
+
   function folderActions(node: LibraryFolderNode) {
     const folder = folders.find((item) => samePath(item.path, node.rootPath));
     const hidden = hiddenFolderPaths.some((path) => samePath(path, node.rootPath));
@@ -132,13 +143,6 @@ export const FoldersPage = memo(function FoldersPage({
             onClick={() => onToggleFolderHidden(node.rootPath)}
           />
         </Tooltip>
-        <Popconfirm
-          title={t("folders.removeConfirm", { name: node.name })}
-          okText={t("common.remove")}
-          cancelText={t("common.cancel")}
-          okButtonProps={{ danger: true }}
-          onConfirm={() => onRemoveFolder(node.rootPath)}
-        >
           <Tooltip title={removeLabel}>
             <Button
               type="text"
@@ -146,9 +150,9 @@ export const FoldersPage = memo(function FoldersPage({
               className="folder-row-action"
               aria-label={removeLabel}
               icon={<DeleteOutlined />}
+              onClick={() => confirmRemove(node)}
             />
           </Tooltip>
-        </Popconfirm>
       </>
     );
   }
@@ -194,7 +198,7 @@ export const FoldersPage = memo(function FoldersPage({
             <div className="folder-rows page-transition">
               {visibleRoots.map((node) => (
                 <div className="row folder-row" key={node.key}>
-                  <FolderRowButton node={node} onOpen={openFolder} />
+                  <FolderRowButton node={node} folder={folders.find((folder) => samePath(folder.path, node.rootPath))} hidden={hiddenFolderPaths.some((path) => samePath(path, node.rootPath))} onOpen={openFolder} />
                   <div className="row-actions">{folderActions(node)}</div>
                 </div>
               ))}
@@ -271,13 +275,6 @@ export const FoldersPage = memo(function FoldersPage({
                   onClick={() => onToggleFolderHidden(current.rootPath)}
                 />
               </Tooltip>
-              <Popconfirm
-                title={t("folders.removeConfirm", { name: current.name })}
-                okText={t("common.remove")}
-                cancelText={t("common.cancel")}
-                okButtonProps={{ danger: true }}
-                onConfirm={() => onRemoveFolder(current.rootPath)}
-              >
                 <Tooltip title={removeLabel}>
                   <Button
                     type="text"
@@ -285,22 +282,13 @@ export const FoldersPage = memo(function FoldersPage({
                     className="folder-bar-action"
                     aria-label={removeLabel}
                     icon={<DeleteOutlined />}
+                    onClick={() => confirmRemove(current)}
                   />
                 </Tooltip>
-              </Popconfirm>
             </div>
           </>
         }
-      >
-        {selectedPaths.length > 0 ? (
-          <LibrarySelectionToolbar
-            selectedCount={selectedPaths.length}
-            onOpenBatch={onOpenBatch}
-            onClear={() => onChangeSelectedPaths([])}
-            onSelectAll={() => onChangeSelectedPaths(visibleSongs.map((track) => track.path))}
-          />
-        ) : null}
-      </SubPageBar>
+      />
       {currentFolder?.error ? (
         <div className="folder-alert">
           <Alert type="error" showIcon message={currentFolder.error} />
@@ -352,19 +340,28 @@ export const FoldersPage = memo(function FoldersPage({
 });
 
 /** One folder line: icon + name + real path + track count. Opens the folder. */
-function FolderRowButton({ node, onOpen }: {
+function FolderRowButton({ node, folder, hidden, onOpen }: {
   node: LibraryFolderNode;
+  folder?: LibraryFolder;
+  hidden?: boolean;
   onOpen: (node: LibraryFolderNode) => void;
 }) {
   const { t } = useTranslation();
   return (
     <button type="button" className="folder-row-open" onClick={() => onOpen(node)}>
       <FolderOutlined className="folder-row-icon" aria-hidden="true" />
-      <strong className="folder-row-name">{node.name}</strong>
-      <Tooltip title={node.path}>
-        <span className="folder-row-path">{node.path}</span>
-      </Tooltip>
-      <span className="folder-row-count">{t("common.songCount", { count: node.totalTrackCount })}</span>
+      <span className="folder-row-text">
+        <strong className="folder-row-name">{node.name}</strong>
+        <Tooltip title={node.path}><span className="folder-row-path">{node.path}</span></Tooltip>
+      </span>
+      <span className="folder-row-facts">
+        <span className="folder-row-count">{t("common.songCount", { count: node.totalTrackCount })}</span>
+        {node.children.length ? <span>{t("folders.subfolderCount", { count: node.children.length })}</span> : null}
+      </span>
+      {folder ? <span className="folder-row-state">
+        <span className={folder.status === "error" ? "folder-state-error" : undefined}>{t(hidden ? "folders.hidden" : `folders.status.${folder.status ?? "ready"}`)}</span>
+        {folder.lastScannedAt ? <span title={t("sort.field.lastScan")}>{formatTimeValue(folder.lastScannedAt)}</span> : null}
+      </span> : null}
     </button>
   );
 }

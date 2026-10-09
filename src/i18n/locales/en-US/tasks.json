@@ -96,5 +96,14 @@
       "present": "Present",
       "missing": "Missing"
     }
+  },
+  "feedback": {
+    "progressDetails": "View task progress",
+    "viewTasks": "View tasks",
+    "batch": {
+      "succeeded": "Batch processing completed",
+      "failed": "Batch processing failed",
+      "cancelled": "Batch processing cancelled"
+    }
   }
 }

@@ -1,5 +1,5 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { App as AntApp, ConfigProvider, Form, Spin, theme } from "antd";
+import { App as AntApp, Button, ConfigProvider, Form, Spin, theme } from "antd";
 import enUS from "antd/locale/en_US";
 import zhCN from "antd/locale/zh_CN";
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -30,8 +30,8 @@ import {
   installSourcePluginArchive,
   saveSourcePluginSettings,
   saveDesktopSettings,
-  setSourcePluginEnabled,
-  setSourcePluginOrder,
+  setPluginSourceEnabled,
+  reorderPluginSources,
   searchLyricsLines,
   pickPaths,
   pickSavePath,
@@ -58,7 +58,7 @@ import {
   setLanguagePreference as persistLanguagePreference,
   type LanguagePreference,
 } from "../i18n";
-import type { ArtistSplitConfig, AudioTrack, BatchTask, BatchTaskItem, CustomTag, DesktopSettings, LibraryFolder, ScanProgress, SourcePlugin, TagForm, ViewKey } from "./types";
+import type { ArtistSplitConfig, AudioTrack, BatchTask, BatchTaskItem, CustomTag, DesktopSettings, LibraryFolder, ScanProgress, PluginSourceKind, SourcePlugin, TagForm, ViewKey } from "./types";
 
 const PluginsPage = lazy(() => import("../pages/PluginsPage").then((m) => ({ default: m.PluginsPage })));
 const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
@@ -67,10 +67,12 @@ import { getReplayGainProgress, publishReplayGainProgress } from "../hooks/useRe
 import { getThemeMode, prefersDark, setThemeMode, subscribeTheme } from "./theme";
 import type { ThemeMode } from "../backend/audioApi";
 import { isPathInHiddenFolder } from "../domain/libraryVisibility";
+import { deduplicateFolders, folderPathKey, upsertFolder } from "../domain/libraryFolders";
 import { artistPosterBaseNames } from "../domain/artistPoster";
 import { shareFile } from "@sosweetham/tauri-plugin-sharehub-api";
 import { fileUrlForShare } from "../domain/share";
 import "../App.css";
+import { reorderPluginState } from "../data/pluginSources";
 
 const defaultDesktopSettings: DesktopSettings = {
   searchPageSize: 10,
@@ -166,7 +168,7 @@ export default function App() {
         },
       }}
     >
-      <AntApp>
+      <AntApp message={{ top: "calc(var(--titlebar-height) + 12px)", maxCount: 3 }} notification={{ placement: "bottomRight", bottom: 40, maxCount: 3 }}>
         {/* Outer boundary: a crash in LyricoDesktop itself must not blank the window. */}
         <AppErrorBoundary>
           <LyricoDesktop />
@@ -196,7 +198,10 @@ function PageViewport({ scrollKey, hidden, children }: { scrollKey: string; hidd
 }
 
 function LyricoDesktop() {
-  const { message } = AntApp.useApp();
+  const { message, notification } = AntApp.useApp();
+  const notifiedTasks = useRef(new Set<string>());
+  const pluginMutationInFlight = useRef(false);
+  const [pluginMutationBusy, setPluginMutationBusy] = useState(false);
   const { t, i18n } = useTranslation();
   const [activeView, setActiveView] = useState<ViewKey>("songs");
   const [tracks, setTracks] = useState<AudioTrack[]>([]);
@@ -214,6 +219,7 @@ function LyricoDesktop() {
   const [detailTrack, setDetailTrack] = useState<AudioTrack>();
   const [detailCustomTags, setDetailCustomTags] = useState<CustomTag[]>([]);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsMounted, setDetailsMounted] = useState(false);
   const [albumDetailsOpen, setAlbumDetailsOpen] = useState(false);
   const [artistDetailsOpen, setArtistDetailsOpen] = useState(false);
   const [plugins, setPlugins] = useState<SourcePlugin[]>([]);
@@ -223,6 +229,8 @@ function LyricoDesktop() {
   const [scanProgress, setScanProgress] = useState<ScanProgress>();
   const [form] = Form.useForm<TagForm>();
   const detailRequest = useRef(0);
+  const activeFolderScans = useRef(new Set<string>());
+  const folderScanQueue = useRef<Promise<void>>(Promise.resolve());
   const editingPathRef = useRef<string | undefined>(undefined);
   const artistSplitSaveQueue = useRef<Promise<void>>(Promise.resolve());
   const settingsSaveQueue = useRef<Promise<void>>(Promise.resolve());
@@ -330,7 +338,7 @@ function LyricoDesktop() {
   useEffect(() => {
     Promise.all([loadLibraryFolders(), loadLibraryTracks(), loadArtistSplitConfig(), loadSourcePlugins(), loadDesktopSettings()])
       .then(([storedFolders, storedTracks, storedArtistSplitConfig, storedPlugins, storedSettings]) => {
-        setFolders(storedFolders);
+        setFolders(deduplicateFolders(storedFolders));
         setTracks(storedTracks);
         setSelectedFolderPath(storedFolders[0]?.path);
         setSelectedPath(storedTracks[0]?.path);
@@ -350,8 +358,22 @@ function LyricoDesktop() {
   useEffect(() => {
     let disposed = false;
     let unlisten: UnlistenFn | undefined;
+    const finished = notifiedTasks.current;
     void listen<BatchTask>("batch-task-updated", ({ payload }) => {
       if (!disposed && ["succeeded", "failed", "cancelled"].includes(payload.status)) {
+        const key = `${payload.taskId}:${payload.finishedAt ?? payload.updatedAt}`;
+        if (!finished.has(key)) {
+          finished.add(key);
+          const hasErrors = payload.status === "failed" || payload.failureCount > 0;
+          notification.open({
+            key: `batch:${payload.taskId}`,
+            type: hasErrors ? "warning" : payload.status === "cancelled" ? "info" : "success",
+            title: t(`feedback.batch.${payload.status}`),
+            description: <><div>{t("tasks.taskSummary", { current: payload.current, total: payload.total, success: payload.successCount, skipped: payload.skippedCount, failed: payload.failureCount })}</div>{payload.errorMessage && <div>{payload.errorMessage}</div>}</>,
+            duration: hasErrors ? 0 : 6,
+            actions: <Button size="small" onClick={() => { setActiveView("tasks"); notification.destroy(`batch:${payload.taskId}`); }}>{t("feedback.viewTasks")}</Button>,
+          });
+        }
         void loadBatchTaskItems(payload.taskId).then(async (items) => {
           const refreshPaths = libraryPathsToRefresh(payload.taskType, items);
           const refreshed = refreshPaths.length ? await loadLibraryTracksByPaths(refreshPaths) : [];
@@ -388,7 +410,7 @@ function LyricoDesktop() {
       disposed = true;
       unlisten?.();
     };
-  }, []);
+  }, [notification, t]);
 
   useEffect(() => {
     let disposed = false;
@@ -453,32 +475,47 @@ function LyricoDesktop() {
 
   async function addFolders() {
     const selectedPaths = await pickPaths({ directory: true, multiple: true, title: t("folders.add") });
-    const newPaths = selectedPaths.filter((path) => !folders.some((folder) => samePath(folder.path, path)));
+    const seen = new Set(folders.map((folder) => folderPathKey(folder.path)));
+    const newPaths = selectedPaths.filter((path) => {
+      const key = folderPathKey(path);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
     if (newPaths.length === 0) return;
     for (const path of newPaths) await scanAndMergeFolder(path);
   }
 
   async function scanAndMergeFolder(path: string) {
-    setLoading(true);
-    setFolders((current) => upsertFolder(current, { path, trackCount: 0, status: "scanning" }));
-    try {
-      const folderTracks = await scanFolder(path);
-      const scannedAt = new Date().toISOString();
-      setTracks((current) => mergeFolderTracks(current, folderTracks, path));
-      setFolders((current) =>
-        upsertFolder(current, { path, trackCount: folderTracks.length, status: "ready", lastScannedAt: scannedAt }),
-      );
-      setSelectedFolderPath(path);
-      setSelectedPath((current) => current ?? folderTracks[0]?.path);
-      message.success(t("messages.scanned", { count: folderTracks.length }));
-    } catch (error) {
-      const failedFolder = { path, trackCount: 0, status: "error" as const, error: String(error) };
-      setFolders((current) => upsertFolder(current, failedFolder));
-      await upsertLibraryFolder(failedFolder).catch(() => undefined);
-      message.error(String(error));
-    } finally {
-      setLoading(false);
-    }
+    const scanKey = folderPathKey(path);
+    if (activeFolderScans.current.has(scanKey)) return;
+    activeFolderScans.current.add(scanKey);
+    // The shell has one scan-progress surface, so all entry points share one queue.
+    const scan = folderScanQueue.current.then(async () => {
+      setLoading(true);
+      setFolders((current) => upsertFolder(current, { path, trackCount: 0, status: "scanning" }));
+      try {
+        const folderTracks = await scanFolder(path);
+        const scannedAt = new Date().toISOString();
+        setTracks((current) => mergeFolderTracks(current, folderTracks, path));
+        setFolders((current) =>
+          upsertFolder(current, { path, trackCount: folderTracks.length, status: "ready", lastScannedAt: scannedAt }),
+        );
+        setSelectedFolderPath(path);
+        setSelectedPath((current) => current ?? folderTracks[0]?.path);
+        notification.success({ title: t("scanProgress.phase.completed"), description: t("messages.scanned", { count: folderTracks.length }) });
+      } catch (error) {
+        const failedFolder = { path, trackCount: 0, status: "error" as const, error: String(error) };
+        setFolders((current) => upsertFolder(current, failedFolder));
+        await upsertLibraryFolder(failedFolder).catch(() => undefined);
+        notification.error({ title: t("scanProgress.phase.failed"), description: String(error), duration: 0 });
+      } finally {
+        activeFolderScans.current.delete(scanKey);
+        setLoading(activeFolderScans.current.size > 0);
+      }
+    });
+    folderScanQueue.current = scan.catch(() => undefined);
+    await scan;
   }
 
   const selectTrack = useCallback(function selectTrack(path?: string) {
@@ -492,6 +529,7 @@ function LyricoDesktop() {
   const openTrackDetails = useCallback(async function openTrackDetails(path = selectedPath) {
     if (!path) return;
     setSelectedPath(path);
+    setDetailsMounted(true);
     setDetailsOpen(true);
     if (detailTrack?.path === path) return;
 
@@ -568,18 +606,6 @@ function LyricoDesktop() {
     }
   }
 
-  const openBatchForSelection = useCallback(function openBatchForSelection() {
-    if (selectedPaths.length === 0) {
-      message.warning(t("messages.selectSongs"));
-      return;
-    }
-    setDetailsOpen(false);
-    setAlbumDetailsOpen(false);
-    setArtistDetailsOpen(false);
-    setSelectionMode(false);
-    setActiveView("tasks");
-  }, [selectedPaths.length, t, message]);
-
   const changeSelectionMode = useCallback(function changeSelectionMode(enabled: boolean) {
     setSelectedPaths([]);
     setSelectionMode(enabled);
@@ -629,7 +655,7 @@ function LyricoDesktop() {
         replayGainTrackPeak: result.trackPeak,
         replayGainReferenceLoudness: result.referenceLoudness,
       });
-      message.success(t("messages.replayGainCalculated"));
+      notification.success({ title: t("messages.replayGainCalculated"), description: requestedPath });
     } catch (error) {
       publishReplayGainProgress({ jobId, path: requestedPath, percent: 0, status: String(error).toLowerCase().includes("cancelled") ? "cancelled" : "failed", message: String(error) });
       if (editingPathRef.current !== requestedPath) return;
@@ -766,44 +792,62 @@ function LyricoDesktop() {
     return nextTrack;
   }
 
-  async function installPlugin() {
-    const [archivePath] = await pickPaths({
-      title: t("sources.install"),
-      multiple: false,
-      directory: false,
-      filters: [{ name: "Lyrico plugin", extensions: ["zip"] }],
-    });
-    if (!archivePath) return;
+  async function runPluginMutation<T>(operation: () => Promise<T>): Promise<T> {
+    if (pluginMutationInFlight.current) throw new Error(t("common.operationFailed"));
+    pluginMutationInFlight.current = true;
+    setPluginMutationBusy(true);
     try {
-      const result = await installSourcePluginArchive(archivePath);
-      setPlugins(await loadSourcePlugins());
-      if (result.installed.length) message.success(t("sources.installSuccess", { count: result.installed.length }));
-      if (result.failed.length) {
-        message.error(result.failed.map((failure) => failure.reason).join("; "));
-      }
-    } catch (error) {
-      message.error(String(error));
-      throw error;
+      return await operation();
+    } finally {
+      pluginMutationInFlight.current = false;
+      setPluginMutationBusy(false);
     }
   }
 
-  async function changePluginEnabled(pluginId: string, enabled: boolean) {
-    try {
-      setPlugins(await setSourcePluginEnabled(pluginId, enabled));
-    } catch (error) {
-      message.error(String(error));
-      throw error;
-    }
+  async function installPlugin() {
+    return runPluginMutation(async () => {
+      const [archivePath] = await pickPaths({
+        title: t("sources.install"),
+        multiple: false,
+        directory: false,
+        filters: [{ name: "Lyrico plugin", extensions: ["zip"] }],
+      });
+      if (!archivePath) return;
+      try {
+        const result = await installSourcePluginArchive(archivePath);
+        setPlugins(await loadSourcePlugins());
+        if (result.installed.length) message.success(t("sources.installSuccess", { count: result.installed.length }));
+        if (result.failed.length) {
+          message.error(result.failed.map((failure) => failure.reason).join("; "));
+        }
+      } catch (error) {
+        message.error(String(error));
+        throw error;
+      }
+    });
+  }
+
+  async function changePluginEnabled(pluginId: string, sourceKind: PluginSourceKind, enabled: boolean) {
+    return runPluginMutation(async () => {
+      try {
+        setPlugins(await setPluginSourceEnabled(pluginId, sourceKind, enabled));
+      } catch (error) {
+        message.error(String(error));
+        throw error;
+      }
+    });
   }
 
   async function savePluginConfig(pluginId: string, config: Record<string, string>) {
-    try {
-      setPlugins(await saveSourcePluginSettings(pluginId, config));
-      message.success(t("sources.configSaved"));
-    } catch (error) {
-      message.error(String(error));
-      throw error;
-    }
+    return runPluginMutation(async () => {
+      try {
+        setPlugins(await saveSourcePluginSettings(pluginId, config));
+        message.success(t("sources.configSaved"));
+      } catch (error) {
+        message.error(String(error));
+        throw error;
+      }
+    });
   }
 
   async function shareSelected() {
@@ -819,23 +863,35 @@ function LyricoDesktop() {
     }
   }
 
-  async function movePluginOrder(pluginIds: string[]) {
-    try {
-      setPlugins(await setSourcePluginOrder(pluginIds));
-    } catch (error) {
-      message.error(String(error));
-      throw error;
-    }
+  async function movePluginOrder(sourceKind: PluginSourceKind, pluginIds: string[]) {
+    return runPluginMutation(async () => {
+      const previousStates = new Map(plugins.map(plugin => [plugin.id, plugin.sourceStates[sourceKind]]));
+      // dnd-kit expects the new items in the same render that clears activeId.
+      setPlugins(current => reorderPluginState(current, sourceKind, pluginIds));
+      try {
+        await reorderPluginSources(sourceKind, pluginIds);
+      } catch (error) {
+        setPlugins(current => current.map(plugin => {
+            const previous = previousStates.get(plugin.id);
+            const state = plugin.sourceStates[sourceKind];
+            return previous && state ? { ...plugin, sourceStates: { ...plugin.sourceStates, [sourceKind]: { ...state, priority: previous.priority } } } : plugin;
+        }));
+        message.error(String(error));
+        throw error;
+      }
+    });
   }
 
   async function uninstallPlugin(pluginId: string) {
-    try {
-      setPlugins(await uninstallSourcePlugin(pluginId));
-      message.success(t("sources.uninstallSuccess"));
-    } catch (error) {
-      message.error(String(error));
-      throw error;
-    }
+    return runPluginMutation(async () => {
+      try {
+        setPlugins(await uninstallSourcePlugin(pluginId));
+        message.success(t("sources.uninstallSuccess"));
+      } catch (error) {
+        message.error(String(error));
+        throw error;
+      }
+    });
   }
 
   function changeLanguage(preference: LanguagePreference) {
@@ -913,7 +969,6 @@ function LyricoDesktop() {
             selectionMode={selectionMode}
             onChangeSelectedPaths={onChangeSelectedPaths}
             onChangeSelectionMode={changeSelectionMode}
-            onOpenBatch={openBatchForSelection}
           />
         );
       case "artists":
@@ -935,7 +990,6 @@ function LyricoDesktop() {
             selectionMode={selectionMode}
             onChangeSelectedPaths={onChangeSelectedPaths}
             onChangeSelectionMode={changeSelectionMode}
-            onOpenBatch={openBatchForSelection}
             artistPosters={artistPosters}
           />
         );
@@ -954,12 +1008,12 @@ function LyricoDesktop() {
             onOpenTrack={openTrackDetails}
             selectedPaths={selectedPaths}
             onChangeSelectedPaths={onChangeSelectedPaths}
-            onOpenBatch={openBatchForSelection}
           />
         );
       case "sources":
         return (
           <PluginsPage
+            mutationBusy={pluginMutationBusy}
             plugins={plugins}
             onInstall={installPlugin}
             onChangeEnabled={changePluginEnabled}
@@ -1003,7 +1057,6 @@ function LyricoDesktop() {
             loading={loading}
             onChangeQuery={onChangeQuery}
             onChangeSelectedPaths={onChangeSelectedPaths}
-            onOpenBatch={openBatchForSelection}
             onOpenDetails={openTrackDetails}
           />
         );
@@ -1019,7 +1072,7 @@ function LyricoDesktop() {
   return (
     <>
     <TitleBar />
-    {!detailsOpen ? <Form form={form} component={false} /> : null}
+    {!detailsMounted ? <Form form={form} component={false} /> : null}
       <AppErrorBoundary>
       <Shell
       activeView={activeView}
@@ -1031,13 +1084,12 @@ function LyricoDesktop() {
       onCancelReplayGain={cancelActiveReplayGain}
       onRemoveSelectedTrack={onRemoveSelectedTrack}
       onClearSelectedTracks={onClearSelectedTracks}
-      onOpenSelectedBatch={openBatchForSelection}
     >
       <Suspense fallback={<PageFallback />}>
       <PageViewport key={activeView} scrollKey={activeScrollKey} hidden={false}>
         {renderActivePage()}
       </PageViewport>
-      {detailsOpen ? <SongDetails
+      {detailsMounted ? <SongDetails
         open={detailsOpen}
         loading={detailsLoading}
         track={selectedTrack}
@@ -1058,6 +1110,7 @@ function LyricoDesktop() {
         onImportLyrics={importLyricsFile}
         onExportLyrics={exportLyricsFile}
         onClose={() => setDetailsOpen(false)}
+        onAfterClose={() => setDetailsMounted(false)}
       /> : null}
       </Suspense>
     </Shell>
@@ -1082,11 +1135,6 @@ function mimeTypeForTrack(track: AudioTrack) {
     aif: "audio/aiff",
   };
   return known[extension ?? ""] ?? "application/octet-stream";
-}
-
-function upsertFolder(folders: LibraryFolder[], folder: LibraryFolder) {
-  const rest = folders.filter((candidate) => !samePath(candidate.path, folder.path));
-  return [...rest, folder].sort((left, right) => left.path.localeCompare(right.path));
 }
 
 function renamePathMap(items: BatchTaskItem[]) {
@@ -1128,7 +1176,7 @@ function normalizeFolderPath(path: string) {
 }
 
 function normalizePath(path: string) {
-  return path.replace(/\\/g, "/").toLocaleLowerCase();
+  return folderPathKey(path);
 }
 
 /** IPC tag results are typed but may be null/undefined when the backend returns nothing. */

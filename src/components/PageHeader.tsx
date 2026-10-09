@@ -9,7 +9,7 @@ export function PageHeader({ title, meta, actions, children }: {
   title: ReactNode;
   meta?: ReactNode;
   actions?: ReactNode;
-  /** Sticky-layer content rendered directly under the row (for example a selection bar). */
+  /** Additional sticky-layer content rendered directly under the row. */
   children?: ReactNode;
 }) {
   return (

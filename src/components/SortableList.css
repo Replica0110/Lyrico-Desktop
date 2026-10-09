@@ -53,6 +53,11 @@
   background: var(--bg-primary);
 }
 
+.reorder-handle:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
 .reorder-handle:active,
 .reorder-row.is-dragging .reorder-handle {
   cursor: grabbing;

@@ -103,7 +103,7 @@ export function CoverCropModal({
     : ["topLeft", "topRight", "bottomRight", "bottomLeft"];
 
   return (
-    <Modal
+    <Modal centered
       title={t("cover.crop")}
       open={open}
       width={760}

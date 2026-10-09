@@ -96,5 +96,14 @@
       "present": "存在",
       "missing": "缺失"
     }
+  },
+  "feedback": {
+    "progressDetails": "查看任务进度",
+    "viewTasks": "查看任务",
+    "batch": {
+      "succeeded": "批处理已完成",
+      "failed": "批处理失败",
+      "cancelled": "批处理已取消"
+    }
   }
 }

@@ -17,6 +17,14 @@
     "uninstallConfirm": "Uninstall {{name}}?",
     "uninstallSuccess": "Plugin uninstalled",
     "installedAt": "Installed {{value}}",
-    "updatedAt": "Updated {{value}}"
+    "updatedAt": "Updated {{value}}",
+    "kinds": {
+      "metadata": "Tags",
+      "lyrics": "Lyrics",
+      "covers": "Covers"
+    },
+    "noneInCategory": "No plugins for this category",
+    "uninstallDetail": "The plugin and its configuration will be removed",
+    "uninstallNamed": "Uninstall {{name}}"
   }
 }

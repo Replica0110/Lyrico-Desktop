@@ -163,7 +163,11 @@ export type PluginConfigField = {
   dependency?: unknown;
 };
 
+export type PluginSourceKind = "aggregated" | "metadata" | "lyrics" | "covers";
+export type PluginSourceState = { enabled: boolean; priority: number };
+
 export type SourcePlugin = {
+  sourceStates: Partial<Record<PluginSourceKind, PluginSourceState>>;
   id: string;
   name: string;
   versionCode: number;

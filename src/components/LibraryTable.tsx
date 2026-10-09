@@ -1,4 +1,4 @@
-import { Checkbox, ConfigProvider, Table, Tag, Typography, theme } from "antd";
+import { Checkbox, Table, Tag, Typography } from "antd";
 import type { TableColumnsType, TableProps } from "antd";
 import {
   memo,
@@ -16,6 +16,7 @@ import { selectLibraryRow } from "../domain/librarySelection";
 import { sortTracksBy, type SortState, type TrackSortField } from "../domain/sort";
 import { formatDuration, formatTimestamp } from "../utils/format";
 import { TrackArtwork } from "./TrackArtwork";
+import "./LibraryTable.css";
 
 const { Text } = Typography;
 
@@ -90,8 +91,6 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
   );
 
   const [metrics, setMetrics] = useState({ bodyHeight: FALLBACK_BODY_HEIGHT, tableWidth: FALLBACK_TABLE_WIDTH });
-  const { token } = theme.useToken();
-  const [rowHeight, setRowHeight] = useState<number | null>(null);
   const layout = useMemo(() => resolveColumnLayout(metrics.tableWidth), [metrics.tableWidth]);
   const hostRef = useRef<HTMLDivElement>(null);
 
@@ -124,13 +123,6 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
           ? current
           : { bodyHeight, tableWidth }
       ));
-      const row = host.querySelector<HTMLElement>(".ant-table-tbody-virtual-holder-inner > div");
-      const nextRowHeight = row?.getBoundingClientRect().height ?? 0;
-      if (nextRowHeight > 0) {
-        setRowHeight((current) => (
-          current === null || Math.abs(current - nextRowHeight) > 0.01 ? nextRowHeight : current
-        ));
-      }
     };
 
     const schedule = () => {
@@ -225,6 +217,7 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
     const list: TableColumnsType<AudioTrack> = [
       {
         key: "selection",
+        className: "library-selection-cell",
         title: (
           <Checkbox
             aria-label={t("selection.selectAll")}
@@ -341,19 +334,9 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
     [selectedSet],
   );
 
-  const syncedPaddingSM = rowHeight === null
-    ? token.paddingSM
-    : (rowHeight - Math.floor(token.fontSize * token.lineHeight) - token.lineWidth) / 2;
-
   return (
     <div className="library-track-list" aria-busy={loading}>
       <div className="library-table-host" ref={hostRef}>
-        <ConfigProvider
-          theme={{
-            token: { paddingSM: syncedPaddingSM },
-            components: { Table: { cellPaddingBlockMD: token.paddingSM } },
-          }}
-        >
           <Table
             virtual
             size="middle"
@@ -367,7 +350,6 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
             onRow={onRow}
             rowClassName={rowClassName}
           />
-        </ConfigProvider>
       </div>
     </div>
   );

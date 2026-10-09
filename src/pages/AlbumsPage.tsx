@@ -3,7 +3,6 @@ import { Button, Input, Typography } from "antd";
 import { memo, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AudioTrack } from "../app/types";
-import { LibrarySelectionToolbar } from "../components/LibrarySelectionToolbar";
 import { LibraryTable } from "../components/LibraryTable";
 import { PageHeader } from "../components/PageHeader";
 import { SortSelect } from "../components/SortSelect";
@@ -33,7 +32,6 @@ export const AlbumsPage = memo(function AlbumsPage({
   selectionMode,
   onChangeSelectedPaths,
   onChangeSelectionMode,
-  onOpenBatch,
 }: {
   albums: AlbumGroup[];
   query: string;
@@ -51,21 +49,12 @@ export const AlbumsPage = memo(function AlbumsPage({
   selectionMode: boolean;
   onChangeSelectedPaths: (paths: string[]) => void;
   onChangeSelectionMode: (enabled: boolean) => void;
-  onOpenBatch: () => void;
 }) {
   const { t } = useTranslation();
   const [sort, setSort] = useState<SortState<AlbumSortField>>();
   const sortedAlbums = useMemo(() => (sort ? sortAlbumsBy(albums, sort.key, sort.direction) : albums), [albums, sort]);
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumId);
   const { visibleCount, sentinelRef, hasMore } = useIncrementalGrid(sortedAlbums.length);
-  const clearSelection = () => onChangeSelectedPaths([]);
-  const selectAllAlbums = () => {
-    for (const album of sortedAlbums) {
-      if (!selectedCollectionKeys.includes(`album:${album.id}`)) {
-        onToggleCollection(`album:${album.id}`, album.tracks.map((track) => track.path));
-      }
-    }
-  };
 
   if (detailsOpen && selectedAlbum) {
     return (
@@ -77,16 +66,7 @@ export const AlbumsPage = memo(function AlbumsPage({
             { key: "albums", label: t("albums.title"), onClick: onCloseDetails },
             { key: selectedAlbum.id, label: selectedAlbum.title },
           ]}
-        >
-          {selectedPaths.length > 0 ? (
-            <LibrarySelectionToolbar
-              selectedCount={selectedPaths.length}
-              onOpenBatch={onOpenBatch}
-              onClear={clearSelection}
-              onSelectAll={() => onChangeSelectedPaths(selectedAlbum.tracks.map((track) => track.path))}
-            />
-          ) : null}
-        </SubPageBar>
+        />
         <div className="page-body">
           <section className="detail-heading">
             <TrackArtwork track={{ coverDataUrl: selectedAlbum.coverDataUrl, path: selectedAlbum.coverPath, hasCover: Boolean(selectedAlbum.coverPath) }} size={56} />
@@ -127,16 +107,7 @@ export const AlbumsPage = memo(function AlbumsPage({
             ? <Button icon={<CloseOutlined />} onClick={() => onChangeSelectionMode(false)}>{t("selection.exit")}</Button>
             : <Button icon={<CheckSquareOutlined />} onClick={() => onChangeSelectionMode(true)}>{t("selection.selectAlbums")}</Button>}
         </>}
-      >
-        {selectionMode ? (
-          <LibrarySelectionToolbar
-            selectedCount={selectedPaths.length}
-            onOpenBatch={onOpenBatch}
-            onClear={clearSelection}
-            onSelectAll={selectAllAlbums}
-          />
-        ) : null}
-      </PageHeader>
+      />
       <div className="page-body">
         <div className="album-grid" aria-busy={loading}>
           {sortedAlbums.slice(0, visibleCount).map((album) => {

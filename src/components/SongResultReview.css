@@ -1,0 +1,31 @@
+.song-result-review .ant-modal-body {
+  max-height: calc(100dvh - 210px);
+  min-height: 160px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.song-result-media {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+}
+
+.song-result-media > section {
+  min-width: 0;
+}
+
+.song-result-media .ant-flex {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 600px) {
+  .song-result-media {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.song-result-review .ant-descriptions-item-content {
+  overflow-wrap: anywhere;
+}

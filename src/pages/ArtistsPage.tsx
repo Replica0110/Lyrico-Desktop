@@ -2,7 +2,6 @@ import { CheckOutlined, CheckSquareOutlined, CloseOutlined, SearchOutlined } fro
 import { Button, Input, Typography } from "antd";
 import { memo, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { LibrarySelectionToolbar } from "../components/LibrarySelectionToolbar";
 import { LibraryTable } from "../components/LibraryTable";
 import { PageHeader } from "../components/PageHeader";
 import { SortSelect } from "../components/SortSelect";
@@ -32,7 +31,6 @@ export const ArtistsPage = memo(function ArtistsPage({
   selectionMode,
   onChangeSelectedPaths,
   onChangeSelectionMode,
-  onOpenBatch,
   artistPosters,
 }: {
   artists: ArtistGroup[];
@@ -51,7 +49,6 @@ export const ArtistsPage = memo(function ArtistsPage({
   selectionMode: boolean;
   onChangeSelectedPaths: (paths: string[]) => void;
   onChangeSelectionMode: (enabled: boolean) => void;
-  onOpenBatch: () => void;
   artistPosters: Record<string, string>;
 }) {
   const { t } = useTranslation();
@@ -59,14 +56,6 @@ export const ArtistsPage = memo(function ArtistsPage({
   const sortedArtists = useMemo(() => (sort ? sortArtistsBy(artists, sort.key, sort.direction) : artists), [artists, sort]);
   const selectedArtist = artists.find((artist) => artist.id === selectedArtistId);
   const { visibleCount, sentinelRef, hasMore } = useIncrementalGrid(sortedArtists.length);
-  const clearSelection = () => onChangeSelectedPaths([]);
-  const selectAllArtists = () => {
-    for (const artist of sortedArtists) {
-      if (!selectedCollectionKeys.includes(`artist:${artist.id}`)) {
-        onToggleCollection(`artist:${artist.id}`, artist.tracks.map((track) => track.path));
-      }
-    }
-  };
 
   if (detailsOpen && selectedArtist) {
     return (
@@ -78,16 +67,7 @@ export const ArtistsPage = memo(function ArtistsPage({
             { key: "artists", label: t("artists.title"), onClick: onCloseDetails },
             { key: selectedArtist.id, label: selectedArtist.name },
           ]}
-        >
-          {selectedPaths.length > 0 ? (
-            <LibrarySelectionToolbar
-              selectedCount={selectedPaths.length}
-              onOpenBatch={onOpenBatch}
-              onClear={clearSelection}
-              onSelectAll={() => onChangeSelectedPaths(selectedArtist.tracks.map((track) => track.path))}
-            />
-          ) : null}
-        </SubPageBar>
+        />
         <div className="page-body">
           <section className="detail-heading">
             <TrackArtwork track={{ coverDataUrl: artistPosters[selectedArtist.id] ?? selectedArtist.coverDataUrl, path: selectedArtist.coverPath, hasCover: Boolean(selectedArtist.coverPath || artistPosters[selectedArtist.id]) }} size={56} />
@@ -128,16 +108,7 @@ export const ArtistsPage = memo(function ArtistsPage({
             ? <Button icon={<CloseOutlined />} onClick={() => onChangeSelectionMode(false)}>{t("selection.exit")}</Button>
             : <Button icon={<CheckSquareOutlined />} onClick={() => onChangeSelectionMode(true)}>{t("selection.selectArtists")}</Button>}
         </>}
-      >
-        {selectionMode ? (
-          <LibrarySelectionToolbar
-            selectedCount={selectedPaths.length}
-            onOpenBatch={onOpenBatch}
-            onClear={clearSelection}
-            onSelectAll={selectAllArtists}
-          />
-        ) : null}
-      </PageHeader>
+      />
       <div className="page-body">
         <div className="artist-grid" aria-busy={loading}>
           {sortedArtists.slice(0, visibleCount).map((artist) => {

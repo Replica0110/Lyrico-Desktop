@@ -26,7 +26,7 @@
   flex: 1 1 auto;
   min-width: 0;
   min-height: var(--row-height);
-  padding: 0;
+  padding: 9px 0;
   align-items: center;
   gap: var(--list-gap);
   border: 0;
@@ -45,13 +45,20 @@
 .folder-row-icon {
   flex: 0 0 auto;
   color: var(--text-tertiary);
-  font-size: 14px;
+  font-size: 20px;
+}
+
+.folder-row-text {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
 }
 
 .folder-row-name {
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 40%;
   overflow: hidden;
   color: var(--text-primary);
   font-weight: 600;
@@ -75,6 +82,36 @@
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.folder-row-facts,
+.folder-row-state {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.folder-row-state {
+  min-width: 142px;
+}
+
+.folder-state-error {
+  color: var(--ant-color-error);
+}
+
+@media (max-width: 900px) {
+  .folder-row-state {
+    min-width: 0;
+  }
+  .folder-row-state > span + span {
+    display: none;
+  }
 }
 
 /* Row and bar icon buttons are square so they line up with the control height. */

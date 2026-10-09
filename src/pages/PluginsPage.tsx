@@ -1,45 +1,54 @@
 import { ApiOutlined, AppstoreAddOutlined, DeleteOutlined, SaveOutlined } from "@ant-design/icons";
-import { Avatar, Button, Form, Input, InputNumber, Popconfirm, Select, Switch, Tag, Tabs } from "antd";
-import { useEffect, useMemo, useState } from "react";
+import { Avatar, Button, Form, Input, InputNumber, Modal, Select, Switch, Tag, Tabs, Tooltip } from "antd";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
-import type { PluginConfigField, SourcePlugin } from "../app/types";
+import type { PluginConfigField, PluginSourceKind, SourcePlugin } from "../app/types";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { Panel } from "../components/Panel";
 import { SortableList } from "../components/SortableList";
+import { pluginSources } from "../data/pluginSources";
 import { capabilityLabel } from "../data/pluginCatalog";
 import { formatTimeValue } from "../utils/format";
 import "./PluginsPage.css";
 
+const pluginTypeTabs: PluginSourceKind[] = ["metadata", "lyrics", "covers"];
+
 type PluginsPageProps = {
+  mutationBusy: boolean;
   plugins: SourcePlugin[];
   onInstall: () => Promise<void>;
-  onChangeEnabled: (pluginId: string, enabled: boolean) => Promise<void>;
+  onChangeEnabled: (pluginId: string, sourceKind: PluginSourceKind, enabled: boolean) => Promise<void>;
   onSaveConfig: (pluginId: string, config: Record<string, string>) => Promise<void>;
   onUninstall: (pluginId: string) => Promise<void>;
-  onMoveOrder: (pluginIds: string[]) => Promise<void>;
+  onMoveOrder: (sourceKind: PluginSourceKind, pluginIds: string[]) => Promise<void>;
 };
 
 /**
  * Installed plugins: fixed list rail on the left (drag to change priority),
  * detail of the selected plugin on the right. See docs/ui-layout.md §9.3.
  */
-export function PluginsPage({ plugins, onInstall, onChangeEnabled, onSaveConfig, onUninstall, onMoveOrder }: PluginsPageProps) {
+export function PluginsPage({ mutationBusy, plugins, onInstall, onChangeEnabled, onSaveConfig, onUninstall, onMoveOrder }: PluginsPageProps) {
   const { t } = useTranslation();
+  const [sourceKind, setSourceKind] = useState<PluginSourceKind>("metadata");
+  const [detailTab, setDetailTab] = useState("configuration");
+  const [uninstallTarget, setUninstallTarget] = useState<SourcePlugin>();
+  const visiblePlugins = useMemo(() => pluginSources(plugins, sourceKind), [plugins, sourceKind]);
   const [selectedPluginId, setSelectedPluginId] = useState<string>();
   const [config, setConfig] = useState<Record<string, string>>({});
   const [baseline, setBaseline] = useState<Record<string, string>>({});
   const [busyAction, setBusyAction] = useState<string>();
+  const actionInFlight = useRef(false);
 
-  const selectedPlugin = plugins.find((plugin) => plugin.id === selectedPluginId) ?? plugins[0];
+  const selectedPlugin = visiblePlugins.find((plugin) => plugin.id === selectedPluginId) ?? visiblePlugins[0];
   const selectedId = selectedPlugin?.id;
 
   useEffect(() => {
-    if (!plugins.some((plugin) => plugin.id === selectedPluginId)) {
-      setSelectedPluginId(plugins[0]?.id);
+    if (!visiblePlugins.some((plugin) => plugin.id === selectedPluginId)) {
+      setSelectedPluginId(visiblePlugins[0]?.id);
     }
-  }, [plugins, selectedPluginId]);
+  }, [visiblePlugins, selectedPluginId]);
 
   // Snapshot on entering or switching a plugin: it is both the form draft and the
   // dirty baseline. Keyed by id so a list refresh (install, enable, reorder) does
@@ -53,6 +62,7 @@ export function PluginsPage({ plugins, onInstall, onChangeEnabled, onSaveConfig,
   const manifest = useMemo(() => {
     if (!selectedPlugin) return "";
     const {
+      sourceStates: _sourceStates,
       enabled: _enabled,
       sortOrder: _sortOrder,
       installedAt: _installedAt,
@@ -71,12 +81,15 @@ export function PluginsPage({ plugins, onInstall, onChangeEnabled, onSaveConfig,
   // Action handlers already report their own failure through a message, so a
   // rejected action must not leave a dangling unhandled rejection here.
   async function runAction(key: string, action: () => Promise<void>) {
+    if (mutationBusy || actionInFlight.current) return;
+    actionInFlight.current = true;
     setBusyAction(key);
     try {
       await action();
     } catch {
       // reported by the owning handler
     } finally {
+      actionInFlight.current = false;
       setBusyAction(undefined);
     }
   }
@@ -105,23 +118,11 @@ export function PluginsPage({ plugins, onInstall, onChangeEnabled, onSaveConfig,
           <PluginIcon plugin={plugin} size={32} />
           <span className="plugin-detail-name" title={plugin.name}>{plugin.name}</span>
           <Tag className="plugin-version">v{plugin.versionName}</Tag>
-          <div className="plugin-detail-actions">
-            <Switch
-              checked={plugin.enabled}
-              loading={busyAction === "enabled"}
-              checkedChildren={t("common.enabled")}
-              unCheckedChildren={t("common.disabled")}
-              aria-label={t("sources.toggleEnabled", { name: plugin.name })}
-              onChange={(enabled) => void runAction("enabled", () => onChangeEnabled(plugin.id, enabled))}
-            />
-            <Popconfirm
-              title={t("sources.uninstallConfirm", { name: plugin.name })}
-              okButtonProps={{ danger: true }}
-              onConfirm={() => void runAction("uninstall", () => onUninstall(plugin.id))}
-            >
-              <Button danger icon={<DeleteOutlined />} loading={busyAction === "uninstall"}>{t("sources.uninstall")}</Button>
-            </Popconfirm>
-          </div>
+          {detailTab === "configuration" && fields.some(field => field.type !== "markdown") ? (
+            <Button className="plugin-config-save" type="primary" icon={<SaveOutlined />}
+              disabled={!dirty || mutationBusy || Boolean(busyAction)} loading={busyAction === "save"}
+              onClick={() => void saveConfig(plugin.id)}>{t("common.save")}</Button>
+          ) : null}
         </div>
 
         <div className="plugin-detail-body">
@@ -138,12 +139,14 @@ export function PluginsPage({ plugins, onInstall, onChangeEnabled, onSaveConfig,
 
           <Tabs
             className="plugin-tabs"
+            activeKey={detailTab}
+            onChange={setDetailTab}
             items={[
               {
                 key: "configuration",
                 label: t("sources.configuration"),
                 children: fields.length ? (
-                  <Form layout="vertical" className="plugin-config-form">
+                  <Form layout="vertical" className="plugin-config-form" disabled={(mutationBusy || Boolean(busyAction))}>
                     {fields.map((field) => (
                       <ConfigField
                         key={field.key}
@@ -152,17 +155,7 @@ export function PluginsPage({ plugins, onInstall, onChangeEnabled, onSaveConfig,
                         onChange={(value) => updateConfig(field.key, value)}
                       />
                     ))}
-                    <div className="plugin-config-footer">
-                      <Button
-                        type="primary"
-                        icon={<SaveOutlined />}
-                        disabled={!dirty}
-                        loading={busyAction === "save"}
-                        onClick={() => void saveConfig(plugin.id)}
-                      >
-                        {t("common.save")}
-                      </Button>
-                    </div>
+
                   </Form>
                 ) : <EmptyState description={t("sources.noConfiguration")} />,
               },
@@ -184,6 +177,7 @@ export function PluginsPage({ plugins, onInstall, onChangeEnabled, onSaveConfig,
             type="primary"
             icon={<AppstoreAddOutlined />}
             loading={busyAction === "install"}
+            disabled={(mutationBusy || Boolean(busyAction))}
             onClick={() => void install()}
           >
             {t("sources.install")}
@@ -196,7 +190,7 @@ export function PluginsPage({ plugins, onInstall, onChangeEnabled, onSaveConfig,
           <EmptyState
             description={t("sources.none")}
             action={
-              <Button type="primary" loading={busyAction === "install"} onClick={() => void install()}>
+              <Button type="primary" loading={busyAction === "install"} disabled={(mutationBusy || Boolean(busyAction))} onClick={() => void install()}>
                 {t("sources.install")}
               </Button>
             }
@@ -207,32 +201,58 @@ export function PluginsPage({ plugins, onInstall, onChangeEnabled, onSaveConfig,
           <div className="plugin-layout">
             <Panel
               className="plugin-list-panel"
-              title={t("sources.installed")}
               bodyClassName="plugin-list-body"
             >
+              <Tabs
+                className="plugin-source-tabs"
+                activeKey={sourceKind}
+                onChange={key => setSourceKind(key as PluginSourceKind)}
+                items={pluginTypeTabs.map(key => ({ key, label: t(`sources.kinds.${key}`), disabled: (mutationBusy || Boolean(busyAction)) }))}
+              />
+              {visiblePlugins.length === 0 ? <EmptyState description={t("sources.noneInCategory")} /> : null}
               <SortableList
-                items={plugins.map((plugin) => plugin.id)}
+                disabled={(mutationBusy || Boolean(busyAction))}
+                items={visiblePlugins.map((plugin) => plugin.id)}
                 label={t("sources.installed")}
                 labelFor={(id) => plugins.find((plugin) => plugin.id === id)?.name ?? id}
-                onChange={(ids) => { void runAction("order", () => onMoveOrder(ids)); }}
+                onChange={(ids) => { void runAction("order", () => onMoveOrder(sourceKind, ids)); }}
                 renderItem={(id) => {
                   const plugin = plugins.find((item) => item.id === id);
                   if (!plugin) return null;
                   const active = selectedId === id;
-                  const capabilities = plugin.capabilities.map(capabilityLabel).join(", ") || t("sources.noCapabilities");
                   return (
-                    <button
-                      type="button"
-                      className={`plugin-item${active ? " is-active" : ""}`}
-                      aria-current={active ? "true" : undefined}
-                      onClick={() => setSelectedPluginId(id)}
-                    >
-                      <PluginIcon plugin={plugin} size={20} />
-                      <span className="plugin-item-copy">
-                        <span className="plugin-item-name">{plugin.name}</span>
-                        <span className="plugin-item-meta">{capabilities}</span>
-                      </span>
-                    </button>
+                    <div className={`plugin-item${active ? " is-active" : ""}`}>
+                      <button
+                        type="button"
+                        className="plugin-item-select"
+                        disabled={(mutationBusy || Boolean(busyAction))}
+                        aria-current={active ? "true" : undefined}
+                        onClick={() => setSelectedPluginId(id)}
+                      >
+                        <PluginIcon plugin={plugin} size={28} />
+                        <span className="plugin-item-copy">
+                          <span className="plugin-item-name" title={plugin.name}>{plugin.name}</span>
+                          <span className="plugin-item-meta" title={plugin.author}>v{plugin.versionName}{plugin.author ? ` / ${plugin.author}` : ""}</span>
+                        </span>
+                      </button>
+                      <div className="plugin-item-actions">
+                        <Tooltip title={t(plugin.sourceStates[sourceKind]?.enabled ? "common.enabled" : "common.disabled")}>
+                          <Switch
+                            size="small"
+                            checked={Boolean(plugin.sourceStates[sourceKind]?.enabled)}
+                            loading={busyAction === `enabled:${id}`}
+                            disabled={(mutationBusy || Boolean(busyAction))}
+                            aria-label={t("sources.toggleEnabled", { name: plugin.name })}
+                            onChange={(enabled) => void runAction(`enabled:${id}`, () => onChangeEnabled(id, sourceKind, enabled))}
+                          />
+                        </Tooltip>
+                        <Tooltip title={t("sources.uninstall")}>
+                          <Button size="small" danger type="text" icon={<DeleteOutlined />}
+                            aria-label={t("sources.uninstallNamed", { name: plugin.name })}
+                            disabled={(mutationBusy || Boolean(busyAction))} onClick={() => setUninstallTarget(plugin)} />
+                        </Tooltip>
+                      </div>
+                    </div>
                   );
                 }}
               />
@@ -246,6 +266,15 @@ export function PluginsPage({ plugins, onInstall, onChangeEnabled, onSaveConfig,
           </div>
         </div>
       )}
+      <Modal centered open={Boolean(uninstallTarget)} title={t("sources.uninstallConfirm", { name: uninstallTarget?.name })}
+        okText={t("sources.uninstall")} cancelText={t("common.cancel")} okButtonProps={{ danger: true }}
+        confirmLoading={busyAction === "uninstall"} onCancel={() => setUninstallTarget(undefined)}
+        onOk={() => void runAction("uninstall", async () => {
+          if (uninstallTarget) await onUninstall(uninstallTarget.id);
+          setUninstallTarget(undefined);
+        })}>
+        {t("sources.uninstallDetail")}
+      </Modal>
     </div>
   );
 }

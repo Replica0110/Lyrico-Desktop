@@ -17,6 +17,14 @@
     "uninstallConfirm": "确认卸载 {{name}}？",
     "uninstallSuccess": "插件已卸载",
     "installedAt": "安装于 {{value}}",
-    "updatedAt": "更新于 {{value}}"
+    "updatedAt": "更新于 {{value}}",
+    "kinds": {
+      "metadata": "标签",
+      "lyrics": "歌词",
+      "covers": "封面"
+    },
+    "noneInCategory": "此类型没有插件",
+    "uninstallDetail": "卸载将移除插件及其配置",
+    "uninstallNamed": "卸载 {{name}}"
   }
 }

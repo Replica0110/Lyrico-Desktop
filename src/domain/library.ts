@@ -1,5 +1,6 @@
 import type { ArtistSplitConfig, AudioTrack, BatchCandidate, LibraryFolder } from "../app/types";
 import { normalizedArtistKey } from "./artistKey";
+import { deduplicateFolders } from "./libraryFolders";
 
 const searchTextCache = new WeakMap<AudioTrack, string>();
 
@@ -205,7 +206,7 @@ export function tracksInFolder(tracks: AudioTrack[], folder: LibraryFolder) {
 }
 
 export function buildLibraryFolderTree(folders: LibraryFolder[], tracks: AudioTrack[]) {
-  return folders.map((folder) => buildFolderRoot(folder, tracks));
+  return deduplicateFolders(folders).map((folder) => buildFolderRoot(folder, tracks));
 }
 
 export function tracksInDirectory(tracks: AudioTrack[], directoryPath: string, includeSubfolders: boolean) {
@@ -251,10 +252,14 @@ function buildFolderRoot(folder: LibraryFolder, tracks: AudioTrack[]): LibraryFo
   const root = createFolderNode(rootPath, rootPath, undefined);
   const nodes = new Map<string, LibraryFolderNode>([[root.key, root]]);
   const rootPrefix = root.key.endsWith("/") ? root.key : `${root.key}/`;
+  const seen = new Set<string>();
 
   for (const track of tracks) {
     const trackPath = normalizeFileSystemPath(track.path);
     if (!trackPath.toLocaleLowerCase().startsWith(rootPrefix)) continue;
+    const trackKey = trackPath.toLocaleLowerCase();
+    if (seen.has(trackKey)) continue;
+    seen.add(trackKey);
     const directory = parentDirectory(trackPath);
     const relativeDirectory = directory.slice(rootPath.length).replace(/^\/+/, "");
     let parent = root;

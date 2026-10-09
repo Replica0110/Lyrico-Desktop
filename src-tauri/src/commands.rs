@@ -484,7 +484,7 @@ pub(crate) async fn scan_folder(
     }
     let artist_separator = app_config::load_artist_split_config(&app)?.artist_separator;
     let ignore_short_audio = app_config::load_desktop_settings(&app)?.ignore_short_audio;
-    let scan_key = normalize_path(&folder_path);
+    let scan_key = crate::database::folder_path_key(&folder_path);
     {
         let mut active_scans = state
             .active_scans
@@ -1098,10 +1098,6 @@ fn emit_scan_progress(
             message,
         },
     );
-}
-
-fn normalize_path(path: &str) -> String {
-    path.replace('\\', "/").to_lowercase()
 }
 
 fn should_skip_short_audio(duration_seconds: u64, enabled: bool) -> bool {
