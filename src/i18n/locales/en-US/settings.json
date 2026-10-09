@@ -74,6 +74,8 @@
     "logsTag": "Tag",
     "openSourceLicenses": "Open source licenses",
     "editFields": "Edit fields",
+    "fieldGroupTag": "Group",
+    "groupMembersHint": "Drag to reorder the group; switches control field visibility.",
     "contributors": "Contributors",
     "contributorsFailed": "Could not load contributors",
     "contributorsEmpty": "No contributors yet",

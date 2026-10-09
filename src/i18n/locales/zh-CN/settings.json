@@ -73,6 +73,8 @@
     "logsTag": "标签",
     "openSourceLicenses": "开源许可",
     "editFields": "编辑字段",
+    "fieldGroupTag": "组",
+    "groupMembersHint": "拖动调整组内顺序，开关控制字段显隐。",
     "contributors": "贡献者",
     "contributorsFailed": "无法加载贡献者",
     "contributorsEmpty": "暂无贡献者",

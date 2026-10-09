@@ -77,6 +77,25 @@ export function flattenEditFieldBlocks(blocks: readonly EditFieldBlock[]): strin
   return blocks.flatMap((block) => block.fields);
 }
 
+/**
+ * Reorder the members of one composite block in place, keeping the block where it is.
+ * Unknown codes are ignored and any member missing from `members` keeps its relative position at the end.
+ * Mirrors the mobile app's `EditFieldConfig.withComponentOrder`.
+ */
+export function withEditFieldBlockMembers(
+  order: readonly string[] | undefined,
+  blockKey: string,
+  members: readonly string[],
+): string[] {
+  const blocks = toEditFieldBlocks(normalizeEditFieldOrder(order));
+  return flattenEditFieldBlocks(blocks.map((block) => {
+    if (block.key !== blockKey || !block.composite) return block;
+    const reordered = members.filter((key) => block.fields.includes(key));
+    const missing = block.fields.filter((key) => !reordered.includes(key));
+    return { ...block, fields: [...reordered, ...missing] };
+  }));
+}
+
 export function normalizeEditFieldOrder(order: readonly string[] | undefined) {
   const expanded = (order ?? []).flatMap(key => legacyGroups[key] ?? [key]);
   const unique = [...new Set([...expanded, ...DEFAULT_EDIT_FIELD_ORDER])].filter(key => DEFAULT_EDIT_FIELD_ORDER.includes(key));

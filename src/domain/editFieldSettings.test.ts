@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_EDIT_FIELD_ORDER,
+  REPLAY_GAIN_BLOCK_KEY,
   REPLAY_GAIN_FIELDS,
   flattenEditFieldBlocks,
   normalizeEditFieldOrder,
   toEditFieldBlocks,
+  withEditFieldBlockMembers,
 } from "./editFieldSettings";
 
 const isReplayGain = (key: string) => (REPLAY_GAIN_FIELDS as readonly string[]).includes(key);
@@ -52,5 +54,22 @@ describe("edit field order", () => {
     const order = flattenEditFieldBlocks(moved);
     expect(replayGainRun(order)).toEqual([...REPLAY_GAIN_FIELDS]);
     expect(new Set(order).size).toBe(DEFAULT_EDIT_FIELD_ORDER.length);
+  });
+
+  it("reorders members inside the group without moving the group", () => {
+    const before = normalizeEditFieldOrder(undefined);
+    const members = ["replayGainAlbumGain", "replayGainTrackGain", "replayGainTrackPeak", "replayGainAlbumPeak", "replayGainReferenceLoudness"];
+    const after = withEditFieldBlockMembers(before, REPLAY_GAIN_BLOCK_KEY, members);
+    expect(toEditFieldBlocks(after).filter(block => block.composite)[0].fields).toEqual(members);
+    // Block order is untouched, so the group stays where it was.
+    expect(toEditFieldBlocks(after).map(block => block.key)).toEqual(toEditFieldBlocks(before).map(block => block.key));
+    expect(new Set(after).size).toBe(DEFAULT_EDIT_FIELD_ORDER.length);
+  });
+
+  it("ignores unknown member codes and keeps members that were left out", () => {
+    const before = normalizeEditFieldOrder(undefined);
+    const after = withEditFieldBlockMembers(before, REPLAY_GAIN_BLOCK_KEY, ["unknown", "replayGainAlbumPeak"]);
+    expect(toEditFieldBlocks(after).find(block => block.composite)?.fields)
+      .toEqual(["replayGainAlbumPeak", ...REPLAY_GAIN_FIELDS.filter(key => key !== "replayGainAlbumPeak")]);
   });
 });

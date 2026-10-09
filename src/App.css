@@ -1199,40 +1199,46 @@ textarea {
   gap: 0 16px;
 }
 
-/* Settings › edit fields: the ReplayGain block renders as one group of member switches. */
-.edit-field-group {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  flex-direction: column;
-  gap: 6px;
-  margin-block: 6px;
-  padding: 8px 10px;
-  border-radius: var(--surface-radius);
-  background: var(--overlay-bg);
-}
-
-.edit-field-group-members {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 4px 20px;
-}
-
-.edit-field-member {
-  display: flex;
+/* Settings › edit fields: a composite block is one row; its members are managed in a dialog. */
+.edit-field-group-open {
+  display: inline-flex;
   min-width: 0;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
+  padding: 2px 6px;
+  margin-inline-start: -6px;
+  border: 0;
+  border-radius: var(--surface-radius);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
-/* A composite block is taller than one line: pin its handle to the first line. */
-.reorder-row:has(.edit-field-group) {
-  align-items: flex-start;
+.edit-field-group-open:hover {
+  background: var(--hover-bg);
 }
 
-.reorder-row:has(.edit-field-group) > .reorder-handle {
-  margin-top: 6px;
+.edit-field-group-open:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: -2px;
+}
+
+.edit-field-tag {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: var(--surface-radius);
+  background: var(--ant-color-primary-bg);
+  color: var(--ant-color-primary);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.edit-field-group-hint {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 12px;
 }
 
 .batch-edit-fields {

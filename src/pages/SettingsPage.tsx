@@ -1,5 +1,5 @@
 import { ApiOutlined, AudioOutlined, EditOutlined, FileTextOutlined, FolderOpenOutlined, GlobalOutlined, InfoCircleOutlined, ImportOutlined, ExportOutlined, ScissorOutlined, SoundOutlined, SyncOutlined } from "@ant-design/icons";
-import { App as AntApp, Avatar, Button, Collapse, Flex, Input, InputNumber, Select, Space, Spin, Switch, Table, Tabs, Tag, Typography, type TableColumnsType } from "antd";
+import { App as AntApp, Avatar, Button, Collapse, Flex, Input, InputNumber, Modal, Select, Space, Spin, Switch, Table, Tabs, Tag, Typography, type TableColumnsType } from "antd";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -13,7 +13,7 @@ import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { exportConfig, importConfig, loadAppLogs, pickPaths, pickSavePath, writeTextFile, type AppLogEntry, type ThemeMode } from "../backend/audioApi";
 import { normalizeCleanupKeywords, normalizeLyricLineOrder } from "../domain/lyricsSettings";
-import { normalizeEditFieldOrder, EDIT_FIELD_LABEL_KEYS, REPLAY_GAIN_BLOCK_KEY, REPLAY_GAIN_FIELDS, toEditFieldBlocks } from "../domain/editFieldSettings";
+import { normalizeEditFieldOrder, EDIT_FIELD_LABEL_KEYS, REPLAY_GAIN_BLOCK_KEY, toEditFieldBlocks, withEditFieldBlockMembers } from "../domain/editFieldSettings";
 import { parseTimeValue } from "../utils/format";
 
 const { Text } = Typography;
@@ -254,56 +254,91 @@ function SettingsSection({ title, children }: { title: string; children: ReactNo
 
 /**
  * Field order editor. Ordering works on blocks, not raw fields: the ReplayGain values are one
- * measurement and always move (and render) as one adjacent group. See docs/ui-layout.md §9.6.
+ * measurement and always move as one adjacent group. A composite row opens a dialog to reorder
+ * and toggle its members, mirroring the mobile app's component sheet. See docs/ui-layout.md §9.6.
  */
 function EditFieldOrderEditor({ settings, onChange }: { settings: DesktopSettings; onChange: (settings: DesktopSettings) => void }) {
   const { t } = useTranslation();
+  const [openBlock, setOpenBlock] = useState<string>();
   const blocks = useMemo(() => toEditFieldBlocks(normalizeEditFieldOrder(settings.editFieldOrder)), [settings.editFieldOrder]);
   const labelOf = (key: string) => t(EDIT_FIELD_LABEL_KEYS.find(([field]) => field === key)?.[1] ?? key);
   const shown = (key: string) => settings.editFieldVisibility?.[key] !== false;
   const setShown = (key: string, checked: boolean) =>
     onChange({ ...settings, editFieldVisibility: { ...settings.editFieldVisibility, [key]: checked } });
+  const setMembersShown = (members: readonly string[], checked: boolean) =>
+    onChange({ ...settings, editFieldVisibility: { ...settings.editFieldVisibility, ...Object.fromEntries(members.map((key) => [key, checked])) } });
 
-  const visibilitySwitch = (key: string) => (
-    <Switch
-      size="small"
-      aria-label={t("settings.showField", { name: labelOf(key) })}
-      checked={shown(key)}
-      onChange={(checked) => setShown(key, checked)}
-    />
-  );
+  const composite = blocks.find((block) => block.key === openBlock && block.composite);
 
   return (
-    <SortableList
-      items={blocks.map((block) => block.key)}
-      label={t("settings.editFields")}
-      labelFor={(key) => (key === REPLAY_GAIN_BLOCK_KEY ? t("settings.replayGain") : labelOf(key))}
-      onChange={(keys) => {
-        const byKey = new Map(blocks.map((block) => [block.key, block]));
-        onChange({ ...settings, editFieldOrder: keys.flatMap((key) => byKey.get(key)?.fields ?? []) });
-      }}
-      renderItem={(key) => {
-        if (key !== REPLAY_GAIN_BLOCK_KEY) {
+    <>
+      <SortableList
+        items={blocks.map((block) => block.key)}
+        label={t("settings.editFields")}
+        labelFor={(key) => (key === REPLAY_GAIN_BLOCK_KEY ? t("settings.replayGain") : labelOf(key))}
+        onChange={(keys) => {
+          const byKey = new Map(blocks.map((block) => [block.key, block]));
+          onChange({ ...settings, editFieldOrder: keys.flatMap((key) => byKey.get(key)?.fields ?? []) });
+        }}
+        renderItem={(key) => {
+          const block = blocks.find((candidate) => candidate.key === key);
+          if (!block?.composite) {
+            return <>
+              <Text>{labelOf(key)}</Text>
+              <Switch
+                size="small"
+                aria-label={t("settings.showField", { name: labelOf(key) })}
+                checked={shown(key)}
+                onChange={(checked) => setShown(key, checked)}
+              />
+            </>;
+          }
+          const allShown = block.fields.every(shown);
           return <>
-            <Text>{labelOf(key)}</Text>
-            {visibilitySwitch(key)}
+            <button type="button" className="edit-field-group-open" onClick={() => setOpenBlock(block.key)}>
+              <Text>{t("settings.replayGain")}</Text>
+              <span className="edit-field-tag">{t("settings.fieldGroupTag")}</span>
+            </button>
+            <Switch
+              size="small"
+              aria-label={t("settings.showField", { name: t("settings.replayGain") })}
+              checked={allShown}
+              onChange={(checked) => setMembersShown(block.fields, checked)}
+            />
           </>;
-        }
-        return (
-          <div className="edit-field-group">
-            <Text strong>{t("settings.replayGain")}</Text>
-            <div className="edit-field-group-members">
-              {REPLAY_GAIN_FIELDS.map((field) => (
-                <div className="edit-field-member" key={field}>
-                  <Text type="secondary">{labelOf(field)}</Text>
-                  {visibilitySwitch(field)}
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      }}
-    />
+        }}
+      />
+
+      <Modal
+        open={Boolean(composite)}
+        title={t("settings.replayGain")}
+        footer={null}
+        width={420}
+        onCancel={() => setOpenBlock(undefined)}
+      >
+        <Text type="secondary" className="edit-field-group-hint">{t("settings.groupMembersHint")}</Text>
+        {composite ? (
+          <SortableList
+            items={composite.fields}
+            label={t("settings.replayGain")}
+            labelFor={labelOf}
+            onChange={(members) => onChange({
+              ...settings,
+              editFieldOrder: withEditFieldBlockMembers(settings.editFieldOrder, composite.key, members),
+            })}
+            renderItem={(field) => <>
+              <Text>{labelOf(field)}</Text>
+              <Switch
+                size="small"
+                aria-label={t("settings.showField", { name: labelOf(field) })}
+                checked={shown(field)}
+                onChange={(checked) => setShown(field, checked)}
+              />
+            </>}
+          />
+        ) : null}
+      </Modal>
+    </>
   );
 }
 
