@@ -1,5 +1,6 @@
 {
   "name": "Lyrico",
+  "description": "面向 Windows 的本地音乐标签编辑与歌词管理工具",
   "private": true,
   "version": "0.1.0",
   "type": "module",

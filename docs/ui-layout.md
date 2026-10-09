@@ -300,9 +300,9 @@
 
 ---
 
-## 11. 复现命令
+## 11. 复现运行时验收
 
-先起前端（Tauri 的 IPC 用浏览器夹具替代，只验证布局与交互，不代表真实磁盘写入）：
+Tauri 的 IPC 由浏览器夹具替代（`scripts/ui-browser-setup.cjs`），只验证布局与交互，不代表真实磁盘写入。dev server 与构建命令见 [README](../README.md)。
 
 ```powershell
 New-Item -ItemType Directory -Force output/playwright
@@ -313,48 +313,6 @@ npx --yes --package @playwright/cli playwright-cli --session layout run-code --f
 npx --yes --package @playwright/cli playwright-cli --session layout run-code --filename scripts/ui-browser-flows.cjs
 ```
 
-同一个 session 里连续跑多个 `run-code` 会保留上一轮的状态（比如抽屉还开着）。`audit` / `flows` 脚本开头都会 `page.reload()` 复位，新写脚本时也要这么做。
+同一个 session 里连续跑多个 `run-code` 会保留上一轮状态（比如抽屉还开着）；`audit` / `flows` 开头都会 `page.reload()` 复位，新写脚本时也要这么做。截图写在 `output/playwright/`（不纳入 Git）。
 
-单元测试与构建：
-
-```powershell
-npm test
-npm run build
-```
-
----
-
-## 12. 本轮验证（2026-10-08 第二轮）
-
-统一了 7 个页面的页头骨架，重做文件夹二级页面顶部区、插件页两栏布局，恢复了歌曲页「单击行 = 编辑」，并用 dnd-kit 换掉自研拖拽。
-
-**修掉的具体缺陷（都有前后数字）**
-
-| 项 | 之前 | 之后 |
-| --- | --- | --- |
-| 页头标题字号 | `h2` 被 antd Typography 顶成 28px | 全部 20px（`PageHeader` 用普通 `h2`） |
-| 页头高度 | 1180px 下歌曲/专辑/艺术家/文件夹 68px（动作区被压成 449px 后折行）；720px 下同样折行 | 两种窗口下 7 页全部 44px（搜索框 `flex: 1 1 160px` 先缩，动作区不折行） |
-| 文件夹二级页面顶部 | 页头（含「添加文件夹」）+ 面包屑两行叠加 | 一行：返回 + 真实路径（逐段可点）+ 本层 3 个操作；二级条行高 40px（两种窗口实测） |
-| 歌曲页多选 | 单击 = 进入多选，页头 6 个按钮 | 单击 = 打开编辑；首列常显复选框（表头半选可用）；页头 3 个按钮 |
-| 选择模型 | `selectionMode` 贯穿 5 个页面 | 表格类列表用数据（`selectedPaths`）驱动选择条；网格（专辑/艺术家）保留显式模式 |
-| 插件页 | 页头说明句 + 两块浮动卡片 + 左栏单行截断 | 单外框两栏；720px 下名称两行不截断；保存按钮吸底且由 dirty 门控；空态只有一个主按钮 |
-| 拖拽排序 | 自研 pointer 排序，无跟手浮层 | dnd-kit + `DragOverlay` + 落位过渡 + 键盘排序与播报，只在落位提交一次 |
-| 空态一致性 | 批处理 7 张表用 antd 插画 + 部分空态无下一步 | 全部换成纯文字 `EmptyState`，并补上「重新扫描文件夹 / 去选歌」等下一步动作 |
-| 保存崩溃 | IPC 返回空值时 `setTracks` updater 抛错 → 整页空白 | 结果判空 + `AppErrorBoundary`（内外两层），实测降级为「操作失败」提示且页面不丢 |
-| 死 CSS | `App.css` 唯一类名 252 个（相对 HEAD），大量 folder-/plugin-/selection-dialog- 规则无人引用 | 删除 175 条失效规则；唯一类名 199；`App.css` 40.3 KB → 33.6 KB |
-| 死键 | 复核扫描出 134 个 i18n 叶子键无任何引用 | 已清理，并做全视图运行时扫描确认无 key 泄漏 |
-| 硬编码颜色 | 侧栏选中态/暗色覆盖块/圆角用死值 | 全部并回 token；仅保留「图片上叠字」「裁剪遮罩」「Windows 关闭按钮」三处必要的绝对值 |
-
-**证据**
-
-- `npx tsc --noEmit`：0 错误。
-- `npm test`：21 个文件、63 项测试通过（含重写的 6 项布局契约）。
-- `npm run build`：成功。
-- Playwright：28 张主矩阵截图 + 8 张二级页面截图，全部 0 溢出、0 裁切、0 `pageerror`；跨页页头几何逐项相等。
-- 交互走查见 10.2，每条都记录了点击次数。
-
-**未覆盖**
-
-- 插件配置的动态表单只用了 1 个夹具插件（含 text/password/dropdown/switch/依赖项/markdown 六种字段），不代表所有插件的真实表单。
-- 浏览器夹具是模拟 IPC，**不证明**真实磁盘写入、系统对话框、标签写盘。
-- 720×520 是文档声明支持的最小窗口；更窄的窗口未纳入验收。
+**未覆盖**：插件动态表单只用了一个夹具插件；夹具是模拟 IPC，不证明真实磁盘写入、系统对话框或标签落盘；720×520 是声明支持的最小窗口，更窄的窗口不纳入验收。
