@@ -95,10 +95,13 @@
     "builtinSeparators": "内置分隔符",
     "builtinSeparatorsHint": "选择用于拆分艺术家名称的符号。",
     "customSeparators": "自定义分隔符",
-    "customSeparatorsHint": "输入分隔符后按回车；如果空格属于分隔符，会原样保留。",
+    "customSeparatorsHint": "输入分隔符后按回车或点「添加」；空格属于分隔符时会原样保留。",
     "customSeparatorsPlaceholder": "添加 +、with 等分隔符",
-    "customNoSplitHint": "输入完整艺术家名称后按回车。",
+    "customNoSplitHint": "输入完整艺术家名称后按回车或点「添加」。",
     "customNoSplitPlaceholder": "添加必须保持完整的艺术家名",
-    "noSplit": "不拆分的艺术家"
+    "noSplit": "不拆分的艺术家",
+    "invalidEmpty": "内容不能为空",
+    "duplicateItem": "该项已存在",
+    "duplicateBuiltin": "该项已存在于内置列表"
   }
 }

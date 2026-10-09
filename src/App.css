@@ -1695,6 +1695,8 @@ html[data-theme="dark"] .app-content {
 .tag-field { min-width: 0; }
 .tag-field .ant-form-item { margin-bottom: 16px; }
 .artist-rule-list { display: flex; flex-direction: column; gap: 8px; }
+/* Separators are one or two characters: keep their rows compact. */
+.artist-rule-list.is-compact .ant-input { max-width: 140px; }
 .about-page { max-width: 600px; margin: 0 auto; padding: 32px 20px; text-align: center; }
 .about-page > h2 { margin: 12px 0 4px; }
 .about-page > .ant-typography { display: block; }

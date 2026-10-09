@@ -96,10 +96,13 @@
     "builtinSeparators": "Built-in separators",
     "builtinSeparatorsHint": "Choose the separators used in artist names.",
     "customSeparators": "Custom separators",
-    "customSeparatorsHint": "Type a separator and press Enter. Whitespace is preserved when it is part of the separator.",
+    "customSeparatorsHint": "Type a separator and press Enter or Add. Spaces are kept when they are part of the separator.",
     "customSeparatorsPlaceholder": "Add separators such as + or with",
-    "customNoSplitHint": "Type a complete artist name and press Enter.",
+    "customNoSplitHint": "Type a complete artist name and press Enter or Add.",
     "customNoSplitPlaceholder": "Add artist names that must stay intact",
-    "noSplit": "Artists to keep together"
+    "noSplit": "Artists to keep together",
+    "invalidEmpty": "Value cannot be empty",
+    "duplicateItem": "That entry already exists",
+    "duplicateBuiltin": "That entry already exists in the built-in list"
   }
 }

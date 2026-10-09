@@ -1,4 +1,5 @@
 import type { ArtistSplitConfig, AudioTrack, BatchCandidate, LibraryFolder } from "../app/types";
+import { normalizedArtistKey } from "./artistKey";
 
 const searchTextCache = new WeakMap<AudioTrack, string>();
 
@@ -183,10 +184,6 @@ export function effectiveArtistSeparators(config: ArtistSplitConfig) {
 export function effectiveNoSplitArtists(config: ArtistSplitConfig) {
   const custom = config.customNoSplitArtists.filter((item) => item.enabled).map((item) => item.name);
   return custom.filter((value) => value.trim()).filter((value, index, all) => all.findIndex((candidate) => normalizedArtistKey(candidate) === normalizedArtistKey(value)) === index);
-}
-
-function normalizedArtistKey(value: string) {
-  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
 }
 
 function startsWithIgnoreCase(input: string, value: string, index: number) {
