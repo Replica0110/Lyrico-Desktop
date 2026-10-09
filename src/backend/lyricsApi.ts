@@ -129,9 +129,9 @@ export function lyricsCandidateLabel(candidate: unknown, index: number) {
   if (!parts.length) {
     const title = candidateText(candidate, "title", "name", "songName");
     const artist = candidateText(candidate, "artist", "artists", "singer");
-    if (title || artist) return [title, artist].filter(Boolean).join(" · ");
+    if (title || artist) return [title, artist].filter(Boolean).join(", ");
   }
-  return parts.length ? parts.join(" · ") : `#${index + 1}`;
+  return parts.length ? parts.join(", ") : `#${index + 1}`;
 }
 
 /** Mirrors the Rust `lyrics_payload` conversion into a pipeline-readable object. */

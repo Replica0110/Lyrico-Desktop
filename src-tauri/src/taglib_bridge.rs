@@ -22,7 +22,7 @@ pub(crate) struct Cover {
     pub data: Vec<u8>,
 }
 unsafe extern "C" {
-    fn lyrico_taglib_open(path: *const c_char, audio_properties: i32) -> *mut c_void;
+    fn lyrico_taglib_open(path: *const c_char, audio_properties: i32, read_only: i32) -> *mut c_void;
     fn lyrico_taglib_close(handle: *mut c_void);
     fn lyrico_taglib_error() -> *const c_char;
     fn lyrico_taglib_free(buffer: *mut u8);
@@ -91,9 +91,15 @@ fn cstring(value: &str) -> Result<CString, String> {
 }
 impl File {
     pub(crate) fn open(path: &Path, audio_properties: bool) -> Result<Self, String> {
+        Self::open_with_access(path, audio_properties, true)
+    }
+    pub(crate) fn open_writable(path: &Path) -> Result<Self, String> {
+        Self::open_with_access(path, false, false)
+    }
+    fn open_with_access(path: &Path, audio_properties: bool, read_only: bool) -> Result<Self, String> {
         let path = path.to_str().ok_or("Audio path is not valid Unicode")?;
         let path = cstring(path)?;
-        let handle = unsafe { lyrico_taglib_open(path.as_ptr(), i32::from(audio_properties)) };
+        let handle = unsafe { lyrico_taglib_open(path.as_ptr(), i32::from(audio_properties), i32::from(read_only)) };
         match NonNull::new(handle) {
             Some(handle) => Ok(Self {
                 handle,

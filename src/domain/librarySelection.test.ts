@@ -4,9 +4,9 @@ import { selectLibraryRow } from "./librarySelection";
 const paths = ["first", "second", "third", "fourth", "fifth"];
 
 describe("library row selection", () => {
-  it("does not turn a normal row click into a batch selection", () => {
+  it("selects a single row for a normal click", () => {
     expect(selectLibraryRow(paths, [], null, 1, { shiftKey: false, ctrlKey: false, metaKey: false })).toEqual({
-      selectedPaths: [],
+      selectedPaths: ["second"],
       anchorIndex: 1,
     });
   });

@@ -136,6 +136,7 @@ export type DesktopSettings = {
   renameCharacterMappings: Record<string, string>;
   themeMode: "system" | "light" | "dark";
   replayGainTargetLoudness: number;
+  replayGainPeakMode: "samplePeak" | "truePeak";
   editFieldVisibility: Record<string, boolean>;
   editFieldOrder: string[];
 };
@@ -230,6 +231,7 @@ export type BatchCandidate = {
 export type BatchTaskStatus = "queued" | "running" | "succeeded" | "failed" | "skipped" | "cancelled";
 
 export type BatchTask = {
+  progress?: number;
   taskId: string;
   taskType: string;
   status: BatchTaskStatus;

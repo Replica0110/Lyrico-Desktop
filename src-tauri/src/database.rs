@@ -694,6 +694,7 @@ impl Database {
             NEXT_BATCH_ID.fetch_add(1, Ordering::Relaxed)
         );
         let task = BatchTask {
+            progress: 0.0,
             task_id: task_id.clone(),
             task_type: task_type.to_string(),
             status: "queued".to_string(),
@@ -770,7 +771,8 @@ impl Database {
             .prepare(
                 "SELECT task_id, type, status, total, current, success_count, failure_count,
                         skipped_count, config_json, started_at, finished_at, created_at,
-                        updated_at, error_message
+                        updated_at, error_message,
+                        (SELECT COALESCE(AVG(CASE WHEN status IN ('succeeded','failed','skipped','cancelled') THEN 1.0 ELSE COALESCE(progress,0.0) END),0.0) FROM batch_task_items WHERE task_id = batch_tasks.task_id)
                  FROM batch_tasks ORDER BY created_at DESC, task_id DESC",
             )
             .map_err(|error| error.to_string())?;
@@ -1256,6 +1258,7 @@ fn batch_path_key(path: &str) -> String {
 
 fn map_batch_task(row: &Row<'_>) -> rusqlite::Result<BatchTask> {
     Ok(BatchTask {
+        progress: row.get(14)?,
         task_id: row.get(0)?,
         task_type: row.get(1)?,
         status: row.get(2)?,
@@ -1278,7 +1281,8 @@ fn load_batch_task(connection: &Connection, task_id: &str) -> Result<BatchTask, 
         .query_row(
             "SELECT task_id, type, status, total, current, success_count, failure_count,
                     skipped_count, config_json, started_at, finished_at, created_at,
-                    updated_at, error_message
+                    updated_at, error_message,
+                    (SELECT COALESCE(AVG(CASE WHEN status IN ('succeeded','failed','skipped','cancelled') THEN 1.0 ELSE COALESCE(progress,0.0) END),0.0) FROM batch_task_items WHERE task_id = batch_tasks.task_id)
              FROM batch_tasks WHERE task_id = ?1",
             params![task_id],
             map_batch_task,
@@ -2104,12 +2108,16 @@ mod tests {
                 .await
                 .expect("task should start");
             assert_eq!(running.status, "running");
+            let partial = database.update_batch_task_item_result(&task.task_id, &items[0].item_id, "running", 0.5, None, None).await.unwrap();
+            assert_eq!(partial.current, 0);
+            assert_eq!(partial.progress, 0.25);
             let after_success = database
                 .update_batch_task_item(&task.task_id, &items[0].item_id, "succeeded", 1.0, None)
                 .await
                 .expect("first item should finish");
             assert_eq!(after_success.current, 1);
             assert_eq!(after_success.success_count, 1);
+            assert_eq!(after_success.progress, 0.5);
             let after_skip = database
                 .update_batch_task_item(
                     &task.task_id,

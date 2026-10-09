@@ -94,12 +94,6 @@ export const builtinArtistSeparators = [
   { id: "featuring", value: " featuring ", defaultEnabled: false, displayName: "featuring" },
 ] as const;
 
-export const builtinNoSplitArtists = [
-  { id: "simon_and_garfunkel", name: "Simon & Garfunkel", defaultEnabled: true },
-  { id: "earth_wind_and_fire", name: "Earth, Wind & Fire", defaultEnabled: true },
-  { id: "bump_of_chicken", name: "BUMP OF CHICKEN", defaultEnabled: true },
-] as const;
-
 export const defaultArtistSplitConfig: ArtistSplitConfig = {
   enabled: true,
   artistSeparator: "/",
@@ -187,11 +181,8 @@ export function effectiveArtistSeparators(config: ArtistSplitConfig) {
 }
 
 export function effectiveNoSplitArtists(config: ArtistSplitConfig) {
-  const builtin = builtinNoSplitArtists
-    .filter((item) => config.builtinNoSplitArtistOverrides[item.id] ?? item.defaultEnabled)
-    .map((item) => item.name);
   const custom = config.customNoSplitArtists.filter((item) => item.enabled).map((item) => item.name);
-  return [...builtin, ...custom].filter((value) => value.trim()).filter((value, index, all) => all.findIndex((candidate) => normalizedArtistKey(candidate) === normalizedArtistKey(value)) === index);
+  return custom.filter((value) => value.trim()).filter((value, index, all) => all.findIndex((candidate) => normalizedArtistKey(candidate) === normalizedArtistKey(value)) === index);
 }
 
 function normalizedArtistKey(value: string) {

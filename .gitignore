@@ -31,3 +31,10 @@ src-tauri/native/taglib-build-*/
 # Local agent state
 .opencode/
 test-lofty/target/
+
+# Local browser verification artifacts
+.playwright-cli/
+output/playwright/
+
+# Native CMake build directory
+build/

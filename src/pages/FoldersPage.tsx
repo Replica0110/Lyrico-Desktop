@@ -1,21 +1,35 @@
-import { DeleteOutlined, EyeInvisibleOutlined, EyeOutlined, FolderAddOutlined, ReloadOutlined } from "@ant-design/icons";
-import { Alert, Badge, Breadcrumb, Button, Empty, Flex, Input, Segmented, Space, Tooltip, Tree, Typography } from "antd";
-import { memo, useEffect, useMemo, useState, type Key, type ReactNode } from "react";
+import {
+  DeleteOutlined,
+  EyeInvisibleOutlined,
+  EyeOutlined,
+  FolderAddOutlined,
+  FolderOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+} from "@ant-design/icons";
+import { Alert, Button, Input, Popconfirm, Tooltip } from "antd";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AudioTrack, LibraryFolder } from "../app/types";
+import { EmptyState } from "../components/EmptyState";
+import { LibrarySelectionToolbar } from "../components/LibrarySelectionToolbar";
 import { LibraryTable } from "../components/LibraryTable";
+import { PageHeader } from "../components/PageHeader";
 import { SortSelect } from "../components/SortSelect";
+import { SubPageBar } from "../components/SubPageBar";
 import { buildLibraryFolderTree, filterTracks, tracksInDirectory, type LibraryFolderNode } from "../domain/library";
 import { folderSortFields, sortFoldersBy, type FolderSortField, type SortState } from "../domain/sort";
-import { formatTimeValue } from "../utils/format";
+import "./FoldersPage.css";
 
-const { DirectoryTree } = Tree;
-const { Title, Text } = Typography;
-
+/**
+ * Folders: the library root list, and the folder contents as a second-level page.
+ * The root list is one row per folder (icon, name, real path, track count, hover actions).
+ * Entering a folder replaces the whole page with SubPageBar + the shared song table.
+ * See docs/ui-layout.md sections 3, 4, 5 and 9.2.
+ */
 export const FoldersPage = memo(function FoldersPage({
   folders,
   tracks,
-  selectedFolderPath,
   loading,
   onAddFolders,
   onRescanFolder,
@@ -23,17 +37,13 @@ export const FoldersPage = memo(function FoldersPage({
   hiddenFolderPaths,
   onToggleFolderHidden,
   onSelectFolder,
-  onSelectTrack,
   onOpenTrack,
   selectedPaths,
-  selectionMode,
   onChangeSelectedPaths,
-  onChangeSelectionMode,
   onOpenBatch,
 }: {
   folders: LibraryFolder[];
   tracks: AudioTrack[];
-  selectedFolderPath?: string;
   loading: boolean;
   onAddFolders: () => void;
   onRescanFolder: (path: string) => void;
@@ -41,188 +51,323 @@ export const FoldersPage = memo(function FoldersPage({
   hiddenFolderPaths: string[];
   onToggleFolderHidden: (path: string) => void;
   onSelectFolder: (path?: string) => void;
-  onSelectTrack: (path?: string) => void;
   onOpenTrack: (path: string) => void;
   selectedPaths: string[];
-  selectionMode: boolean;
   onChangeSelectedPaths: (paths: string[]) => void;
-  onChangeSelectionMode: (enabled: boolean) => void;
   onOpenBatch: () => void;
 }) {
   const { t } = useTranslation();
   const [folderSort, setFolderSort] = useState<SortState<FolderSortField>>();
-  const sortedFolders = useMemo(() => (folderSort ? sortFoldersBy(folders, folderSort.key, folderSort.direction) : folders), [folders, folderSort]);
-  const folderTree = useMemo(() => buildLibraryFolderTree(sortedFolders, tracks), [sortedFolders, tracks]);
-  const nodeMap = useMemo(() => mapFolderNodes(folderTree), [folderTree]);
-  const selectedRoot = folderTree.find((node) => samePath(node.rootPath, selectedFolderPath)) ?? folderTree[0];
-  const [selectedDirectoryKey, setSelectedDirectoryKey] = useState<string>();
-  const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
-  const [scope, setScope] = useState<"recursive" | "direct">("recursive");
+  const [currentKey, setCurrentKey] = useState<string>();
   const [query, setQuery] = useState("");
 
+  const sortedFolders = useMemo(
+    () => (folderSort ? sortFoldersBy(folders, folderSort.key, folderSort.direction) : folders),
+    [folders, folderSort],
+  );
+  const roots = useMemo(() => buildLibraryFolderTree(sortedFolders, tracks), [sortedFolders, tracks]);
+  const nodes = useMemo(() => mapFolderNodes(roots), [roots]);
+  const current = currentKey ? nodes.get(currentKey) : undefined;
+  const searching = query.trim().length > 0;
+  const visibleRoots = useMemo(
+    () => (searching ? roots.filter((node) => matchesFolder(node, query)) : roots),
+    [roots, searching, query],
+  );
+  const folderSongs = useMemo(
+    () => (current ? tracksInDirectory(tracks, current.path, false) : []),
+    [tracks, current],
+  );
+  const visibleSongs = useMemo(
+    () => (searching ? filterTracks(folderSongs, query) : folderSongs),
+    [folderSongs, searching, query],
+  );
+  const handleOpenTrack = useCallback((track: AudioTrack) => onOpenTrack(track.path), [onOpenTrack]);
+  const clearQuery = useCallback(() => setQuery(""), []);
+
+  // A removed or rescanned-away folder drops out of the tree: fall back to the root list.
   useEffect(() => {
-    if (!selectedRoot) {
-      setSelectedDirectoryKey(undefined);
-      return;
+    if (currentKey && !current) {
+      setCurrentKey(undefined);
+      setQuery("");
     }
-    const current = selectedDirectoryKey ? nodeMap.get(selectedDirectoryKey) : undefined;
-    if (!current || !samePath(current.rootPath, selectedRoot.rootPath)) setSelectedDirectoryKey(selectedRoot.key);
-  }, [nodeMap, selectedDirectoryKey, selectedRoot]);
+  }, [currentKey, current]);
 
-  useEffect(() => {
-    const rootKeys = folderTree.map((node) => node.key);
-    setExpandedKeys((current) => {
-      const missing = rootKeys.filter((key) => !current.includes(key));
-      return missing.length ? [...current, ...missing] : current;
-    });
-  }, [folderTree]);
-
-  const activeNode = (selectedDirectoryKey ? nodeMap.get(selectedDirectoryKey) : undefined) ?? selectedRoot;
-  const activeRoot = activeNode ? folders.find((folder) => samePath(folder.path, activeNode.rootPath)) : undefined;
-  const folderTracks = useMemo(() => activeNode ? tracksInDirectory(tracks, activeNode.path, scope === "recursive") : [], [activeNode, tracks, scope]);
-  const visibleTracks = useMemo(() => filterTracks(folderTracks, query), [folderTracks, query]);
-  const breadcrumbs = useMemo(() => activeNode ? folderAncestors(nodeMap, activeNode) : [], [activeNode, nodeMap]);
-  const lastScanText = activeRoot ? formatTimeValue(activeRoot.lastScannedAt) : "-";
-  const treeData = useMemo(() => folderTree.map((node) => toTreeData(node, folders)), [folderTree, folders]);
-
-  function selectDirectory(node: LibraryFolderNode) {
-    setSelectedDirectoryKey(node.key);
+  function openFolder(node: LibraryFolderNode) {
+    setCurrentKey(node.key);
     setQuery("");
-    const root = folders.find((folder) => samePath(folder.path, node.rootPath));
-    if (root && !samePath(root.path, selectedFolderPath)) onSelectFolder(root.path);
+    onSelectFolder(node.rootPath);
   }
 
-  return (
-    <div className="workspace page-stack">
-      <Flex className="folder-page-header" justify="space-between" align="center" gap={16} wrap>
-        <Title level={2}>{t("folders.title")}</Title>
-        <Button type="primary" icon={<FolderAddOutlined />} onClick={onAddFolders}>{t("folders.add")}</Button>
-      </Flex>
+  function openRoot() {
+    setCurrentKey(undefined);
+    setQuery("");
+    onSelectFolder(undefined);
+  }
 
-      {folders.length === 0 && !loading ? (
-        <section className="desktop-list-surface">
-          <Empty className="page-empty" image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("folders.empty")}>
-            <Button type="primary" icon={<FolderAddOutlined />} onClick={onAddFolders}>{t("folders.add")}</Button>
-          </Empty>
-        </section>
-      ) : (
-        <section className="folder-browser">
-          <aside className="folder-sidebar">
-            <Flex className="folder-pane-header" align="center" justify="space-between">
-              <Text strong>{t("folders.libraryRoots")}</Text>
-              <Text type="secondary">{folders.length}</Text>
-            </Flex>
-            <div className="folder-tree-scroll">
-              <DirectoryTree
-                blockNode
-                showIcon
-                treeData={treeData}
-                selectedKeys={activeNode ? [activeNode.key] : []}
-                expandedKeys={expandedKeys}
-                onExpand={(keys) => setExpandedKeys(keys)}
-                onSelect={(keys) => {
-                  const node = keys[0] ? nodeMap.get(String(keys[0])) : undefined;
-                  if (node) selectDirectory(node);
-                }}
+  function folderActions(node: LibraryFolderNode) {
+    const folder = folders.find((item) => samePath(item.path, node.rootPath));
+    const hidden = hiddenFolderPaths.some((path) => samePath(path, node.rootPath));
+    const rescanLabel = t("folders.rescan");
+    const visibilityLabel = t(hidden ? "folders.show" : "folders.hide");
+    const removeLabel = t("folders.remove");
+    return (
+      <>
+        <Tooltip title={rescanLabel}>
+          <Button
+            type="text"
+            className="folder-row-action"
+            aria-label={rescanLabel}
+            icon={<ReloadOutlined />}
+            loading={folder?.status === "scanning"}
+            disabled={loading}
+            onClick={() => onRescanFolder(node.rootPath)}
+          />
+        </Tooltip>
+        <Tooltip title={visibilityLabel}>
+          <Button
+            type="text"
+            className="folder-row-action"
+            aria-label={visibilityLabel}
+            icon={hidden ? <EyeOutlined /> : <EyeInvisibleOutlined />}
+            onClick={() => onToggleFolderHidden(node.rootPath)}
+          />
+        </Tooltip>
+        <Popconfirm
+          title={t("folders.removeConfirm", { name: node.name })}
+          okText={t("common.remove")}
+          cancelText={t("common.cancel")}
+          okButtonProps={{ danger: true }}
+          onConfirm={() => onRemoveFolder(node.rootPath)}
+        >
+          <Tooltip title={removeLabel}>
+            <Button
+              type="text"
+              danger
+              className="folder-row-action"
+              aria-label={removeLabel}
+              icon={<DeleteOutlined />}
+            />
+          </Tooltip>
+        </Popconfirm>
+      </>
+    );
+  }
+
+  const addFolderButton = (
+    <Button type="primary" icon={<FolderAddOutlined />} onClick={onAddFolders}>
+      {t("folders.add")}
+    </Button>
+  );
+
+  if (!current) {
+    const noFolderMatch = roots.length > 0 && visibleRoots.length === 0;
+    // Keep the empty state off screen while the library is still loading, unless a search is active.
+    const showEmptyState = noFolderMatch || !loading;
+    return (
+      <div className="page-shell">
+        <PageHeader
+          title={t("folders.title")}
+          meta={t("common.folderCount", { count: folders.length })}
+          actions={
+            <>
+              <Input
+                allowClear
+                className="page-search"
+                prefix={<SearchOutlined />}
+                placeholder={t("folders.searchPlaceholder")}
+                aria-label={t("folders.searchPlaceholder")}
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
               />
+              <SortSelect
+                value={folderSort}
+                onChange={setFolderSort}
+                fields={folderSortFields.map((key) => ({ key, label: t(`sort.field.${key}`) }))}
+              />
+              {/* The empty state already offers this action; showing it twice on one screen is noise. */}
+              {noFolderMatch || roots.length ? addFolderButton : null}
+            </>
+          }
+        />
+        <div className="page-body">
+          {visibleRoots.length ? (
+            <div className="folder-rows page-transition">
+              {visibleRoots.map((node) => (
+                <div className="row folder-row" key={node.key}>
+                  <FolderRowButton node={node} onOpen={openFolder} />
+                  <div className="row-actions">{folderActions(node)}</div>
+                </div>
+              ))}
             </div>
-          </aside>
+          ) : showEmptyState ? (
+            <EmptyState
+              description={noFolderMatch ? t("songs.noResults") : t("folders.empty")}
+              action={
+                noFolderMatch
+                  ? <Button onClick={clearQuery}>{t("songs.clearSearch")}</Button>
+                  : addFolderButton
+              }
+            />
+          ) : null}
+        </div>
+      </div>
+    );
+  }
 
-          <main className="folder-main-pane">
-            {activeNode && activeRoot ? (
-              <>
-                <Flex className="folder-pane-header" align="center" justify="space-between" gap={12}>
-                  <Space>
-                    <Tooltip title={displayFolderPath(activeNode.path, activeRoot.path)}>
-                      <Breadcrumb
-                        className="folder-detail-breadcrumb"
-                        items={breadcrumbs.map((node, index) => ({
-                          title: index === breadcrumbs.length - 1 ? node.name : (
-                            <Button type="link" size="small" className="folder-breadcrumb-button" onClick={() => selectDirectory(node)}>{node.name}</Button>
-                          ),
-                        }))}
-                      />
-                    </Tooltip>
-                    {activeRoot && lastScanText !== "-" ? (
-                      <Tooltip title={activeRoot.lastScannedAt}>
-                        <Text className="folder-last-scan" type="secondary">{t("folders.lastScanValue", { value: lastScanText })}</Text>
-                      </Tooltip>
-                    ) : null}
-                  </Space>
-                  <Space>
-                    <Tooltip title={t("folders.rescan")}>
-                      <Button
-                        type="text"
-                        icon={<ReloadOutlined />}
-                        aria-label={t("folders.rescan")}
-                        loading={activeRoot.status === "scanning"}
-                        disabled={loading || activeRoot.status === "scanning"}
-                        onClick={() => onRescanFolder(activeRoot.path)}
-                      />
-                    </Tooltip>
-                    {activeNode.parentKey == null ? (
-                      <Tooltip title={hiddenFolderPaths.some((path) => samePath(path, activeRoot.path)) ? t("folders.show") : t("folders.hide")}>
-                        <Button
-                          type="text"
-                          icon={hiddenFolderPaths.some((path) => samePath(path, activeRoot.path)) ? <EyeOutlined /> : <EyeInvisibleOutlined />}
-                          aria-label={hiddenFolderPaths.some((path) => samePath(path, activeRoot.path)) ? t("folders.show") : t("folders.hide")}
-                          onClick={() => onToggleFolderHidden(activeRoot.path)}
-                        />
-                      </Tooltip>
-                    ) : null}
-                    {activeNode.parentKey == null ? (
-                      <Tooltip title={t("folders.remove")}>
-                        <Button type="text" danger icon={<DeleteOutlined />} aria-label={t("folders.remove")} onClick={() => onRemoveFolder(activeRoot.path)} />
-                      </Tooltip>
-                    ) : null}
-                  </Space>
-                </Flex>
-                {activeRoot.error ? <Alert className="folder-error-alert" type="error" showIcon message={activeRoot.error} /> : null}
+  const ancestors = folderAncestors(nodes, current);
+  const currentFolder = folders.find((item) => samePath(item.path, current.rootPath));
+  const currentHidden = hiddenFolderPaths.some((path) => samePath(path, current.rootPath));
+  const rescanLabel = t("folders.rescan");
+  const visibilityLabel = t(currentHidden ? "folders.show" : "folders.hide");
+  const removeLabel = t("folders.remove");
 
-                <Flex className="folder-content-toolbar" align="center" justify="space-between" gap={12} wrap>
-                  <Segmented
-                    value={scope}
-                    options={[
-                      { value: "recursive", label: t("folders.includeSubfolders") },
-                      { value: "direct", label: t("folders.currentFolderOnly") },
-                    ]}
-                    onChange={(value) => setScope(value as "recursive" | "direct")}
-                  />
-                  <Input.Search
-                    allowClear
-                    className="folder-search"
-                    value={query}
-                    placeholder={t("folders.searchPlaceholder")}
-                    onChange={(event) => setQuery(event.target.value)}
-                  />
-                  <SortSelect
-                    value={folderSort}
-                    onChange={setFolderSort}
-                    fields={folderSortFields.map((key) => ({ key, label: t(`sort.field.${key}`) }))}
-                  />
-                </Flex>
-
-                <LibraryTable
-                  tracks={visibleTracks}
-                  loading={loading}
-                  onSelectTrack={onSelectTrack}
-                  onOpenTrack={(track) => onOpenTrack(track.path)}
-                  selectedPaths={selectedPaths}
-                  onChangeSelectedPaths={onChangeSelectedPaths}
-                  selectionMode={selectionMode}
-                  onChangeSelectionMode={onChangeSelectionMode}
-                  onOpenBatch={onOpenBatch}
+  return (
+    <div className="page-shell">
+      <SubPageBar
+        backLabel={t("common.back")}
+        onBack={() => {
+          const parent = current.parentKey ? nodes.get(current.parentKey) : undefined;
+          if (parent) openFolder(parent);
+          else openRoot();
+        }}
+        label={t("folders.title")}
+        items={[
+          { key: "root", label: t("folders.allFolders"), onClick: openRoot },
+          ...ancestors.map((node, index) => ({
+            key: node.key,
+            label: node.name,
+            onClick: index === ancestors.length - 1 ? undefined : () => openFolder(node),
+          })),
+        ]}
+        actions={
+          <>
+            <Input
+              allowClear
+              className="folder-bar-search"
+              prefix={<SearchOutlined />}
+              placeholder={t("folders.searchSongs")}
+              aria-label={t("folders.searchSongs")}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            <div className="folder-bar-buttons">
+              <Tooltip title={rescanLabel}>
+                <Button
+                  type="text"
+                  className="folder-bar-action"
+                  aria-label={rescanLabel}
+                  icon={<ReloadOutlined />}
+                  loading={currentFolder?.status === "scanning"}
+                  disabled={loading}
+                  onClick={() => onRescanFolder(current.rootPath)}
                 />
-              </>
-            ) : (
-              <Empty className="folder-pane-empty" description={t("folders.empty")} />
-            )}
-          </main>
-        </section>
-      )}
+              </Tooltip>
+              <Tooltip title={visibilityLabel}>
+                <Button
+                  type="text"
+                  className="folder-bar-action"
+                  aria-label={visibilityLabel}
+                  icon={currentHidden ? <EyeOutlined /> : <EyeInvisibleOutlined />}
+                  onClick={() => onToggleFolderHidden(current.rootPath)}
+                />
+              </Tooltip>
+              <Popconfirm
+                title={t("folders.removeConfirm", { name: current.name })}
+                okText={t("common.remove")}
+                cancelText={t("common.cancel")}
+                okButtonProps={{ danger: true }}
+                onConfirm={() => onRemoveFolder(current.rootPath)}
+              >
+                <Tooltip title={removeLabel}>
+                  <Button
+                    type="text"
+                    danger
+                    className="folder-bar-action"
+                    aria-label={removeLabel}
+                    icon={<DeleteOutlined />}
+                  />
+                </Tooltip>
+              </Popconfirm>
+            </div>
+          </>
+        }
+      >
+        {selectedPaths.length > 0 ? (
+          <LibrarySelectionToolbar
+            selectedCount={selectedPaths.length}
+            onOpenBatch={onOpenBatch}
+            onClear={() => onChangeSelectedPaths([])}
+            onSelectAll={() => onChangeSelectedPaths(visibleSongs.map((track) => track.path))}
+          />
+        ) : null}
+      </SubPageBar>
+      {currentFolder?.error ? (
+        <div className="folder-alert">
+          <Alert type="error" showIcon message={currentFolder.error} />
+        </div>
+      ) : null}
+      <div className="page-body">
+        <div key={current.key} className="page-transition">
+          {current.children.length ? (
+            <div className="folder-rows folder-subfolders">
+              {current.children.map((node) => (
+                <div className="row folder-row" key={node.key}>
+                  <FolderRowButton node={node} onOpen={openFolder} />
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {visibleSongs.length || loading ? (
+            <LibraryTable
+              tracks={visibleSongs}
+              loading={loading}
+              selectedPaths={selectedPaths}
+              onChangeSelectedPaths={onChangeSelectedPaths}
+              onOpenTrack={handleOpenTrack}
+            />
+          ) : searching ? (
+            <EmptyState
+              description={t("songs.noResults")}
+              action={<Button onClick={clearQuery}>{t("songs.clearSearch")}</Button>}
+            />
+          ) : current.children.length ? null : (
+            <EmptyState
+              description={t("folders.noContents")}
+              action={
+                <Button
+                  icon={<ReloadOutlined />}
+                  loading={currentFolder?.status === "scanning"}
+                  disabled={loading}
+                  onClick={() => onRescanFolder(current.rootPath)}
+                >
+                  {t("folders.rescan")}
+                </Button>
+              }
+            />
+          )}
+        </div>
+      </div>
     </div>
   );
 });
+
+/** One folder line: icon + name + real path + track count. Opens the folder. */
+function FolderRowButton({ node, onOpen }: {
+  node: LibraryFolderNode;
+  onOpen: (node: LibraryFolderNode) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <button type="button" className="folder-row-open" onClick={() => onOpen(node)}>
+      <FolderOutlined className="folder-row-icon" aria-hidden="true" />
+      <strong className="folder-row-name">{node.name}</strong>
+      <Tooltip title={node.path}>
+        <span className="folder-row-path">{node.path}</span>
+      </Tooltip>
+      <span className="folder-row-count">{t("common.songCount", { count: node.totalTrackCount })}</span>
+    </button>
+  );
+}
 
 function mapFolderNodes(roots: LibraryFolderNode[]) {
   const map = new Map<string, LibraryFolderNode>();
@@ -244,28 +389,12 @@ function folderAncestors(nodes: Map<string, LibraryFolderNode>, node: LibraryFol
   return result;
 }
 
-function toTreeData(node: LibraryFolderNode, folders: LibraryFolder[]): { key: string; title: ReactNode; children: ReturnType<typeof toTreeData>[] } {
-  const root = folders.find((folder) => samePath(folder.path, node.rootPath));
-  return {
-    key: node.key,
-    title: (
-      <Flex className="folder-tree-title" align="center" justify="space-between" gap={8}>
-        <Text ellipsis={{ tooltip: displayFolderPath(node.path, root?.path ?? node.rootPath) }}>{node.name}</Text>
-        <Space size={6}>
-          {node.parentKey == null && root ? <Badge status={root.status === "error" ? "error" : root.status === "scanning" ? "processing" : "success"} /> : null}
-          <Text type="secondary">{node.totalTrackCount}</Text>
-        </Space>
-      </Flex>
-    ),
-    children: node.children.map((child) => toTreeData(child, folders)),
-  };
+function matchesFolder(node: LibraryFolderNode, query: string) {
+  const needle = query.trim().toLocaleLowerCase();
+  return node.name.toLocaleLowerCase().includes(needle) || node.path.toLocaleLowerCase().includes(needle);
 }
 
-function samePath(left?: string, right?: string) {
-  if (!left || !right) return false;
-  return left.replace(/\\/g, "/").replace(/\/+$/, "").toLocaleLowerCase() === right.replace(/\\/g, "/").replace(/\/+$/, "").toLocaleLowerCase();
-}
-
-function displayFolderPath(path: string, rootPath: string) {
-  return rootPath.includes("\\") ? path.replace(/\//g, "\\") : path;
+function samePath(left: string, right: string) {
+  return left.replace(/\\/g, "/").replace(/\/+$/, "").toLocaleLowerCase()
+    === right.replace(/\\/g, "/").replace(/\/+$/, "").toLocaleLowerCase();
 }

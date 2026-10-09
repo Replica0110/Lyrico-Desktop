@@ -16,6 +16,7 @@ pub(crate) const REPLAY_GAIN_TARGET_MAX_LUFS: f64 = 0.0;
 pub(crate) struct DesktopSettings {
     pub(crate) search_page_size: u32,
     pub(crate) replay_gain_target_loudness: f64,
+    pub(crate) replay_gain_peak_mode: crate::replay_gain::PeakMode,
     pub(crate) lyric_format: String,
     pub(crate) lyrics_conversion_mode: String,
     pub(crate) show_translation: bool,
@@ -49,6 +50,7 @@ pub(crate) const EDIT_FIELD_KEYS: &[&str] = &[
     "lyricist",
     "copyright",
     "comment",
+    "customTags",
     "rating",
     "lyrics",
     "replayGainTrackGain",
@@ -63,6 +65,7 @@ impl Default for DesktopSettings {
         Self {
             search_page_size: 10,
             replay_gain_target_loudness: crate::replay_gain::DEFAULT_TARGET_LOUDNESS_LUFS,
+            replay_gain_peak_mode: crate::replay_gain::PeakMode::default(),
             lyric_format: "verbatimLrc".to_string(),
             lyrics_conversion_mode: "none".to_string(),
             show_translation: true,
@@ -245,36 +248,24 @@ fn normalize_folder_paths(paths: Vec<String>) -> Vec<String> {
 }
 
 fn default_edit_field_order() -> Vec<String> {
-    [
-        "basic",
-        "track",
-        "credits",
-        "customTags",
-        "replaygain",
-        "lyrics",
-        "cover",
-    ]
-    .into_iter()
-    .map(str::to_string)
-    .collect()
+    EDIT_FIELD_KEYS.iter().map(|key| key.to_string()).collect()
 }
 
 fn normalize_edit_field_order(order: Vec<String>) -> Vec<String> {
     let mut normalized = Vec::new();
     for value in order.into_iter().chain(default_edit_field_order()) {
-        if [
-            "basic",
-            "track",
-            "credits",
-            "customTags",
-            "replaygain",
-            "lyrics",
-            "cover",
-        ]
-        .contains(&value.as_str())
-            && !normalized.iter().any(|item| item == &value)
-        {
-            normalized.push(value);
+        let expanded: Vec<&str> = match value.as_str() {
+            "basic" => vec!["title", "artist", "albumArtist", "album", "year", "language", "genre"],
+            "track" => vec!["trackNumber", "discNumber"],
+            "credits" => vec!["composer", "lyricist", "copyright", "comment"],
+            "replaygain" => vec!["replayGainTrackGain", "replayGainTrackPeak", "replayGainAlbumGain", "replayGainAlbumPeak", "replayGainReferenceLoudness"],
+            "cover" => vec!["rating"],
+            key => vec![key],
+        };
+        for key in expanded {
+            if EDIT_FIELD_KEYS.contains(&key) && !normalized.iter().any(|item| item == key) {
+                normalized.push(key.to_string());
+            }
         }
     }
     normalized

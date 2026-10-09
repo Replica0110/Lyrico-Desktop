@@ -1,0 +1,102 @@
+/* Reorder list — dnd-kit based, styling contract in docs/ui-layout.md §8.
+   Only 4px radius, no gradients, no colored shadows. */
+
+.reorder-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.reorder-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--row-height);
+  border-bottom: 1px solid var(--border-color);
+  background: transparent;
+}
+
+/* Placeholder left behind while the DragOverlay follows the cursor. */
+.reorder-row.is-dragging {
+  background: var(--bg-primary);
+  opacity: 0.4;
+}
+
+/* Keyboard drag: mark the origin row without moving the layout. */
+.reorder-row.is-dragging:focus-within {
+  outline: 1px dashed var(--border-color-strong);
+  outline-offset: -1px;
+}
+
+.reorder-handle {
+  display: grid;
+  place-items: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: var(--control-height);
+  padding: 0;
+  border: 0;
+  border-radius: var(--surface-radius);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.reorder-handle:hover {
+  color: var(--text-primary);
+  background: var(--bg-primary);
+}
+
+.reorder-handle:active,
+.reorder-row.is-dragging .reorder-handle {
+  cursor: grabbing;
+}
+
+.reorder-handle:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: -2px;
+}
+
+.reorder-overlay .reorder-handle.is-overlay {
+  cursor: grabbing;
+}
+
+.reorder-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px 6px 0;
+}
+
+/* Overlay row: the element that follows the cursor. */
+.reorder-overlay {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--row-height);
+  padding-right: 4px;
+  border: 1px solid var(--border-color-strong);
+  border-radius: var(--surface-radius);
+  background: var(--bg-secondary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  cursor: grabbing;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reorder-row,
+  .reorder-overlay {
+    transition: none !important;
+    animation: none !important;
+  }
+}

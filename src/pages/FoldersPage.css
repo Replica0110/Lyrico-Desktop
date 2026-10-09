@@ -1,0 +1,101 @@
+/* Folder page local styles. All class names are folder- prefixed; tokens come from App.css. */
+
+.folder-rows {
+  border-top: 1px solid var(--border-color);
+}
+
+.folder-subfolders {
+  margin-bottom: var(--section-gap);
+}
+
+.folder-row {
+  display: flex;
+  min-width: 0;
+  min-height: var(--row-height);
+  align-items: center;
+  gap: var(--list-gap);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.folder-row:hover {
+  background: var(--hover-bg);
+}
+
+.folder-row-open {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--row-height);
+  padding: 0;
+  align-items: center;
+  gap: var(--list-gap);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.folder-row-open:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: -2px;
+}
+
+.folder-row-icon {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  font-size: 14px;
+}
+
+.folder-row-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 40%;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-row-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-row-count {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Row and bar icon buttons are square so they line up with the control height. */
+.folder-row-action.ant-btn,
+.folder-bar-action.ant-btn {
+  width: var(--control-height);
+  height: var(--control-height);
+  padding: 0;
+}
+
+.folder-bar-buttons {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.folder-bar-search {
+  width: min(200px, 100%);
+}
+
+.folder-alert {
+  margin: var(--section-gap) var(--page-padding) 0;
+}

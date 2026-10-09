@@ -1,9 +1,7 @@
-import { CheckSquareOutlined, CloseOutlined, CloudSyncOutlined } from "@ant-design/icons";
-import { Button, Checkbox, ConfigProvider, Flex, Space, Table, Tag, Typography, theme } from "antd";
+import { Checkbox, ConfigProvider, Table, Tag, Typography, theme } from "antd";
 import type { TableColumnsType, TableProps } from "antd";
 import {
   memo,
-  startTransition,
   useCallback,
   useLayoutEffect,
   useMemo,
@@ -21,7 +19,7 @@ import { TrackArtwork } from "./TrackArtwork";
 
 const { Text } = Typography;
 
-const INDEX_COLUMN_WIDTH = 56;
+const CHECKBOX_COLUMN_WIDTH = 44;
 const SONG_COLUMN_MIN_WIDTH = 300;
 const MIN_BODY_HEIGHT = 240;
 const FALLBACK_BODY_HEIGHT = 480;
@@ -49,11 +47,11 @@ const COLUMN_PRESETS: readonly OptionalColumnKey[][] = [
 function resolveColumnLayout(tableWidth: number) {
   const fixedKeys = COLUMN_PRESETS.find((preset) => {
     const fixedWidth = preset.reduce((total, key) => total + OPTIONAL_COLUMN_WIDTHS[key], 0);
-    return INDEX_COLUMN_WIDTH + SONG_COLUMN_MIN_WIDTH + fixedWidth <= tableWidth;
+    return CHECKBOX_COLUMN_WIDTH + SONG_COLUMN_MIN_WIDTH + fixedWidth <= tableWidth;
   }) ?? COLUMN_PRESETS[COLUMN_PRESETS.length - 1];
   const fixedWidth = fixedKeys.reduce((total, key) => total + OPTIONAL_COLUMN_WIDTHS[key], 0);
-  const songWidth = Math.max(SONG_COLUMN_MIN_WIDTH, tableWidth - INDEX_COLUMN_WIDTH - fixedWidth);
-  return { fixedKeys, songWidth, totalWidth: INDEX_COLUMN_WIDTH + fixedWidth + songWidth };
+  const songWidth = Math.max(SONG_COLUMN_MIN_WIDTH, tableWidth - CHECKBOX_COLUMN_WIDTH - fixedWidth);
+  return { fixedKeys, songWidth, totalWidth: CHECKBOX_COLUMN_WIDTH + fixedWidth + songWidth };
 }
 
 function findScrollParent(element: HTMLElement) {
@@ -66,17 +64,16 @@ function findScrollParent(element: HTMLElement) {
   return undefined;
 }
 
-export const LibraryTable = memo(function LibraryTable({ tracks, loading, selectedPaths = [], onSelectTrack, onOpenTrack, onChangeSelectedPaths, selectionMode = false, onChangeSelectionMode, onOpenBatch, showSelectionToolbar = true, sort, onSortChange }: {
+/**
+ * The one song table. A plain row click opens the editor; selection is data on the
+ * always-present first-column checkbox (Ctrl/⌘ toggles, Shift extends). See docs/ui-layout.md section 7.
+ */
+export const LibraryTable = memo(function LibraryTable({ tracks, loading, selectedPaths = [], onOpenTrack, onChangeSelectedPaths, sort, onSortChange }: {
   tracks: AudioTrack[];
   loading?: boolean;
   selectedPaths?: string[];
-  onSelectTrack: (path?: string) => void;
-  onOpenTrack?: (track: AudioTrack) => void;
+  onOpenTrack: (track: AudioTrack) => void;
   onChangeSelectedPaths?: (paths: string[]) => void;
-  selectionMode?: boolean;
-  onChangeSelectionMode?: (enabled: boolean) => void;
-  onOpenBatch?: () => void;
-  showSelectionToolbar?: boolean;
   sort?: SortState<TrackSortField>;
   onSortChange?: (next?: SortState<TrackSortField>) => void;
 }) {
@@ -97,11 +94,6 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
   const [rowHeight, setRowHeight] = useState<number | null>(null);
   const layout = useMemo(() => resolveColumnLayout(metrics.tableWidth), [metrics.tableWidth]);
   const hostRef = useRef<HTMLDivElement>(null);
-  const toolbarRef = useRef<HTMLDivElement>(null);
-
-  const showActions = showSelectionToolbar && Boolean(onChangeSelectionMode);
-  const showBatchToolbar = selectionMode && showSelectionToolbar && Boolean(onChangeSelectedPaths);
-  const showToolbar = showActions || showBatchToolbar;
 
   useLayoutEffect(() => {
     const host = hostRef.current;
@@ -151,8 +143,6 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
     window.addEventListener("scroll", schedule, true);
     const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(schedule);
     observer?.observe(host);
-    const toolbar = toolbarRef.current;
-    if (observer && toolbar) observer.observe(toolbar);
 
     return () => {
       if (frame !== undefined) window.cancelAnimationFrame(frame);
@@ -160,76 +150,64 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
       window.removeEventListener("scroll", schedule, true);
       observer?.disconnect();
     };
-  }, [showToolbar, selectionMode, sortedTracks.length, loading]);
+  }, [sortedTracks.length, loading, selectedPaths.length]);
 
   const selectedSet = useMemo(() => new Set(selectedPaths), [selectedPaths]);
   const trackPaths = useMemo(() => sortedTracks.map((track) => track.path), [sortedTracks]);
   const anchorRef = useRef<number | null>(null);
   const selectedPathsRef = useRef(selectedPaths);
   const sortedTracksRef = useRef(sortedTracks);
-  const selectionModeRef = useRef(selectionMode);
-  const onSelectTrackRef = useRef(onSelectTrack);
   const onChangeSelectedPathsRef = useRef(onChangeSelectedPaths);
   const onOpenTrackRef = useRef(onOpenTrack);
   selectedPathsRef.current = selectedPaths;
   sortedTracksRef.current = sortedTracks;
-  selectionModeRef.current = selectionMode;
-  onSelectTrackRef.current = onSelectTrack;
   onChangeSelectedPathsRef.current = onChangeSelectedPaths;
   onOpenTrackRef.current = onOpenTrack;
 
-  const toggleTrack = useCallback((track: AudioTrack, index: number) => {
-    anchorRef.current = index;
-    const changeSelectedPaths = onChangeSelectedPathsRef.current;
-    if (!changeSelectedPaths) return;
-    const current = selectedPathsRef.current;
-    changeSelectedPaths(current.includes(track.path)
-      ? current.filter((path) => path !== track.path)
-      : [...current, track.path]);
+  const changeSelection = useCallback((next: string[], anchor: number | null) => {
+    anchorRef.current = anchor;
+    onChangeSelectedPathsRef.current?.(next);
   }, []);
 
+  const toggleTrack = useCallback((track: AudioTrack, index: number) => {
+    const current = selectedPathsRef.current;
+    changeSelection(
+      current.includes(track.path) ? current.filter((path) => path !== track.path) : [...current, track.path],
+      index,
+    );
+  }, [changeSelection]);
+
   const selectRow = useCallback((event: ReactMouseEvent<HTMLElement>, track: AudioTrack, index: number) => {
-    const extendSelection = selectionModeRef.current || event.shiftKey || event.ctrlKey || event.metaKey;
-    if (!extendSelection) {
-      onSelectTrackRef.current(track.path);
-      onOpenTrackRef.current?.(track);
+    if (!onChangeSelectedPathsRef.current) {
+      onOpenTrackRef.current(track);
       return;
     }
-    onSelectTrackRef.current(track.path);
-    const changeSelectedPaths = onChangeSelectedPathsRef.current;
-    if (!changeSelectedPaths) return;
     const result = selectLibraryRow(
       sortedTracksRef.current.map((item) => item.path),
       selectedPathsRef.current,
       anchorRef.current,
       index,
-      selectionModeRef.current && !event.shiftKey && !event.ctrlKey && !event.metaKey
-        ? { ...event, ctrlKey: true }
-        : event,
+      event,
     );
-    anchorRef.current = result.anchorIndex;
-    changeSelectedPaths(result.selectedPaths);
-  }, []);
+    changeSelection(result.selectedPaths, result.anchorIndex);
+  }, [changeSelection]);
 
   const onRow = useCallback((track: AudioTrack, index = 0): HTMLAttributes<HTMLElement> => ({
     tabIndex: 0,
-    onClick: (event) => selectRow(event, track, index),
-    onDoubleClick: () => {
-      if (selectionModeRef.current) onOpenTrackRef.current?.(track);
+    onClick: (event) => {
+      if (event.shiftKey || event.ctrlKey || event.metaKey) selectRow(event, track, index);
+      else onOpenTrackRef.current(track);
     },
     onKeyDown: (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
-        onOpenTrackRef.current?.(track);
+        onOpenTrackRef.current(track);
       }
     },
   }), [selectRow]);
 
-  const selectAll = useCallback(() => {
-    const changeSelectedPaths = onChangeSelectedPathsRef.current;
-    if (!changeSelectedPaths) return;
-    startTransition(() => changeSelectedPaths(trackPaths));
-  }, [trackPaths]);
+  const allSelected = sortedTracks.length > 0 && sortedTracks.every((track) => selectedSet.has(track.path));
+  const someSelected = !allSelected && sortedTracks.some((track) => selectedSet.has(track.path));
 
   const columns = useMemo<TableColumnsType<AudioTrack>>(() => {
     const unknownArtist = t("common.unknownArtist");
@@ -246,17 +224,26 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
 
     const list: TableColumnsType<AudioTrack> = [
       {
-        key: "index",
-        title: "#",
-        width: INDEX_COLUMN_WIDTH,
+        key: "selection",
+        title: (
+          <Checkbox
+            aria-label={t("selection.selectAll")}
+            checked={allSelected}
+            indeterminate={someSelected}
+            disabled={sortedTracks.length === 0}
+            onChange={() => changeSelection(allSelected ? [] : trackPaths, null)}
+          />
+        ),
+        width: CHECKBOX_COLUMN_WIDTH,
         align: "center",
-        render: (_value, track, index) => (selectionMode
-          ? <Checkbox
-              checked={selectedSet.has(track.path)}
-              onClick={(event) => event.stopPropagation()}
-              onChange={() => toggleTrack(track, index)}
-            />
-          : <Text type="secondary">{index + 1}</Text>),
+        render: (_value, track, index) => (
+          <Checkbox
+            aria-label={t("selection.selectRow", { name: track.title || track.fileName })}
+            checked={selectedSet.has(track.path)}
+            onClick={(event) => event.stopPropagation()}
+            onChange={() => toggleTrack(track, index)}
+          />
+        ),
       },
       {
         key: "title",
@@ -266,7 +253,7 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
         ...sortable("title"),
         render: (_value, track) => (
           <div className="library-song-cell">
-            <TrackArtwork track={track} size={42} />
+            <TrackArtwork track={track} size={32} />
             <div className="track-title-cell">
               <Text strong ellipsis={{ tooltip: track.title || track.fileName }}>{track.title || track.fileName}</Text>
               <Text type="secondary" ellipsis={{ tooltip: track.artist }}>{track.artist || unknownArtist}</Text>
@@ -296,7 +283,7 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
         width: OPTIONAL_COLUMN_WIDTHS.format,
         align: "center",
         ...sortable("format"),
-        render: (_value, track) => (track.format ? <Tag bordered={false} className="library-format-tag">{track.format}</Tag> : "—"),
+        render: (_value, track) => (track.format ? <Tag variant="filled" className="library-format-tag">{track.format}</Tag> : "—"),
       });
     }
 
@@ -332,7 +319,7 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
     }
 
     return list;
-  }, [t, activeSort, layout, selectionMode, selectedSet, toggleTrack]);
+  }, [t, activeSort, layout, selectedSet, toggleTrack, changeSelection, allSelected, someSelected, trackPaths, sortedTracks.length]);
 
   const handleTableChange = useCallback<NonNullable<TableProps<AudioTrack>["onChange"]>>(
     (_pagination, _filters, sorter) => {
@@ -350,8 +337,8 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
   );
 
   const rowClassName = useCallback(
-    (track: AudioTrack) => (selectionMode && selectedSet.has(track.path) ? "is-selected" : ""),
-    [selectionMode, selectedSet],
+    (track: AudioTrack) => (selectedSet.has(track.path) ? "is-selected" : ""),
+    [selectedSet],
   );
 
   const syncedPaddingSM = rowHeight === null
@@ -360,31 +347,6 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
 
   return (
     <div className="library-track-list" aria-busy={loading}>
-      {showToolbar ? (
-        <div className="library-sticky-bar" ref={toolbarRef}>
-          {showActions ? (
-            <Flex className="library-list-actions" justify="flex-end">
-              {selectionMode
-                ? <Button icon={<CloseOutlined />} onClick={() => onChangeSelectionMode?.(false)}>{t("selection.exit")}</Button>
-                : <Button icon={<CheckSquareOutlined />} disabled={sortedTracks.length === 0} onClick={() => onChangeSelectionMode?.(true)}>{t("selection.enter")}</Button>}
-            </Flex>
-          ) : null}
-          {showBatchToolbar ? (
-            <Flex className="selection-toolbar" align="center" justify="space-between" gap={12} wrap>
-              <Space>
-                <Button icon={<CheckSquareOutlined />} disabled={sortedTracks.length === 0} onClick={selectAll}>{t("selection.selectAll")}</Button>
-                <Button icon={<CloseOutlined />} disabled={selectedPaths.length === 0} onClick={() => onChangeSelectedPaths?.([])}>{t("selection.clear")}</Button>
-                <Text type="secondary">{t("selection.hint")}</Text>
-              </Space>
-              <Space>
-                <Text>{t("selection.count", { count: selectedPaths.length })}</Text>
-                <Button type="primary" icon={<CloudSyncOutlined />} disabled={selectedPaths.length === 0} onClick={onOpenBatch}>{t("selection.batch")}</Button>
-              </Space>
-            </Flex>
-          ) : null}
-        </div>
-      ) : null}
-
       <div className="library-table-host" ref={hostRef}>
         <ConfigProvider
           theme={{

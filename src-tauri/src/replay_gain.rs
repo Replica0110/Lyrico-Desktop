@@ -12,17 +12,27 @@ use symphonia::core::formats::{FormatOptions, TrackType};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum PeakMode {
+    #[default]
+    SamplePeak,
+    TruePeak,
+}
+
 pub(crate) const DEFAULT_TARGET_LOUDNESS_LUFS: f64 = -18.0;
 
 pub(crate) fn analyze_track(
     job_id: String,
     path: &Path,
     target_loudness_lufs: f64,
+    peak_mode: PeakMode,
     cancelled: &AtomicBool,
     mut on_progress: impl FnMut(f32),
 ) -> Result<ReplayGainAnalysis, String> {
     validate_target_loudness(target_loudness_lufs)?;
     let file = Box::new(File::open(path).map_err(|error| error.to_string())?);
+    let file_size = file.metadata().map(|meta| meta.len()).unwrap_or(0);
     let source = MediaSourceStream::new(file, Default::default());
     let mut hint = Hint::new();
     if let Some(extension) = path.extension().and_then(|value| value.to_str()) {
@@ -41,6 +51,8 @@ pub(crate) fn analyze_track(
         .ok_or_else(|| "No decodable audio track was found".to_string())?;
     let track_id = track.id;
     let total_frames = track.num_frames;
+    let total_duration = track.duration.map(|duration| duration.get());
+    let start_ts = track.start_ts.get();
     let codec_parameters = track
         .codec_params
         .as_ref()
@@ -55,6 +67,7 @@ pub(crate) fn analyze_track(
     let mut analyzer_spec: Option<(u32, u32)> = None;
     let mut samples = Vec::<f32>::new();
     let mut sample_count = 0_u64;
+    let mut decoded_bytes = 0_u64;
     let mut last_progress = 0.0_f32;
     let mut last_progress_at = Instant::now();
     on_progress(0.0);
@@ -79,7 +92,7 @@ pub(crate) fn analyze_track(
         }
         if analyzer.is_none() {
             analyzer = Some(
-                EbuR128::new(channels, spec.rate(), Mode::I | Mode::TRUE_PEAK)
+                EbuR128::new(channels, spec.rate(), Mode::I | match peak_mode { PeakMode::SamplePeak => Mode::SAMPLE_PEAK, PeakMode::TruePeak => Mode::TRUE_PEAK })
                     .map_err(|error| error.to_string())?,
             );
             analyzer_spec = Some((channels, spec.rate()));
@@ -96,16 +109,18 @@ pub(crate) fn analyze_track(
             .map_err(|error| error.to_string())?;
         sample_count += u64::try_from(samples.len() / channels as usize).unwrap_or_default();
 
-        if let Some(total) = total_frames.filter(|total| *total > 0) {
-            let progress = (sample_count as f64 / total as f64).clamp(0.0, 1.0) as f32;
-            if progress - last_progress >= 0.01
-                && last_progress_at.elapsed() >= Duration::from_millis(100)
-            {
-                on_progress(progress);
-                last_progress = progress;
-                last_progress_at = Instant::now();
-            }
+        decoded_bytes += packet.data.len() as u64;
+        let progress = analysis_progress(sample_count, total_frames,
+            packet.pts.get().saturating_sub(start_ts).max(0) as u64,
+            total_duration, decoded_bytes, file_size).max(last_progress);
+        if progress - last_progress >= 0.05
+            || (progress > last_progress && last_progress_at.elapsed() >= Duration::from_millis(100))
+        {
+            on_progress(progress);
+            last_progress = progress;
+            last_progress_at = Instant::now();
         }
+
     }
 
     if cancelled.load(Ordering::Relaxed) {
@@ -122,9 +137,10 @@ pub(crate) fn analyze_track(
     let mut peak = 0.0_f64;
     for channel in 0..channels {
         peak = peak.max(
-            analyzer
-                .true_peak(channel)
-                .map_err(|error| error.to_string())?,
+            match peak_mode {
+                PeakMode::SamplePeak => analyzer.sample_peak(channel),
+                PeakMode::TruePeak => analyzer.true_peak(channel),
+            }.map_err(|error| error.to_string())?,
         );
     }
     on_progress(1.0);
@@ -139,6 +155,17 @@ pub(crate) fn analyze_track(
         track_peak: format_peak(peak),
         reference_loudness: format_reference_loudness(target_loudness_lufs),
     })
+}
+
+// Prefer sample count, then container duration. Packet bytes provide an estimate for
+// streams without duration; completion is only reported after loudness is finalized.
+fn analysis_progress(samples: u64, frames: Option<u64>, timestamp: u64, duration: Option<u64>, bytes: u64, size: u64) -> f32 {
+    let ratio = if let Some(total) = frames.filter(|value| *value > 0) {
+        samples as f64 / total as f64
+    } else if let Some(total) = duration.filter(|value| *value > 0) {
+        timestamp as f64 / total as f64
+    } else if size > 0 { bytes as f64 / size as f64 } else { 0.0 };
+    ratio.clamp(0.0, 0.99) as f32
 }
 
 fn validate_target_loudness(target_loudness_lufs: f64) -> Result<(), String> {
@@ -170,6 +197,51 @@ mod tests {
     use super::*;
 
     #[test]
+    fn peak_modes_and_progress_use_decoded_audio() {
+        let path = std::env::temp_dir().join(format!("lyrico-intersample-{}-{}.wav", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let count = 48000_u32 * 2;
+        let data_len = count * 2;
+        let mut wav = Vec::new();
+        wav.extend(b"RIFF");
+        wav.extend((36 + data_len).to_le_bytes());
+        wav.extend(b"WAVEfmt ");
+        wav.extend(16_u32.to_le_bytes());
+        wav.extend(1_u16.to_le_bytes());
+        wav.extend(1_u16.to_le_bytes());
+        wav.extend(48000_u32.to_le_bytes());
+        wav.extend(96000_u32.to_le_bytes());
+        wav.extend(2_u16.to_le_bytes());
+        wav.extend(16_u16.to_le_bytes());
+        wav.extend(b"data");
+        wav.extend(data_len.to_le_bytes());
+        for index in 0..count {
+            let phase = f64::from(index) * std::f64::consts::FRAC_PI_2 + std::f64::consts::FRAC_PI_4;
+            wav.extend(((phase.sin() * 0.7 * f64::from(i16::MAX)) as i16).to_le_bytes());
+        }
+        std::fs::write(&path, wav).unwrap();
+        let cancelled = AtomicBool::new(false);
+        let mut progress = Vec::new();
+        let sample = analyze_track("sample".into(), &path, -18.0, PeakMode::SamplePeak, &cancelled, |value| progress.push(value)).unwrap();
+        let true_peak = analyze_track("true".into(), &path, -18.0, PeakMode::TruePeak, &cancelled, |_| {}).unwrap();
+        assert!(sample.loudness_lufs.is_finite());
+        assert!(true_peak.peak > sample.peak + 0.1, "true peak must detect intersample peaks");
+        assert!(progress.iter().any(|value| *value > 0.0 && *value < 1.0));
+        assert!(progress.windows(2).all(|pair| pair[1] >= pair[0]));
+        assert_eq!(progress.last(), Some(&1.0));
+        cancelled.store(true, Ordering::Relaxed);
+        assert!(analyze_track("cancel".into(), &path, -18.0, PeakMode::SamplePeak, &cancelled, |_| {}).unwrap_err().contains("cancelled"));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn progress_falls_back_to_duration_then_packet_bytes() {
+        assert_eq!(analysis_progress(50, Some(100), 0, None, 0, 0), 0.5);
+        assert_eq!(analysis_progress(0, None, 50, Some(100), 0, 0), 0.5);
+        assert_eq!(analysis_progress(0, None, 0, None, 50, 100), 0.5);
+        assert_eq!(analysis_progress(100, Some(100), 0, None, 0, 0), 0.99);
+    }
+
+    #[test]
     fn formats_mobile_compatible_replay_gain_values() {
         assert_eq!(format_gain(-9.5, -18.0), "-8.50 dB");
         assert_eq!(format_gain(-9.5, -14.0), "-4.50 dB");
@@ -192,6 +264,7 @@ mod tests {
             "fixture".into(),
             Path::new(&path),
             DEFAULT_TARGET_LOUDNESS_LUFS,
+            PeakMode::SamplePeak,
             &cancelled,
             |_| {},
         )

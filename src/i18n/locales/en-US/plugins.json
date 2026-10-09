@@ -1,42 +1,22 @@
 {
   "sources": {
     "title": "Plugins",
-    "description": "Install and configure API v5 plugins for metadata, lyrics and artwork.",
     "install": "Install plugin",
-    "installTitle": "Install plugin",
-    "installConfirm": "Install",
-    "installed": "Installed plugins",
+    "installed": "Installed",
+    "installedCount": "{{count}} installed",
     "none": "No plugins yet",
     "configuration": "Configuration",
     "noConfiguration": "No settings available",
     "noCapabilities": "No declared capabilities",
     "manifest": "Manifest",
     "select": "Select a plugin",
+    "toggleEnabled": "Enable or disable {{name}}",
     "installSuccess": "Installed {{count}} plugin(s)",
     "configSaved": "Plugin configuration saved",
     "uninstall": "Uninstall plugin",
     "uninstallConfirm": "Uninstall {{name}}?",
     "uninstallSuccess": "Plugin uninstalled",
-    "noneForType": "No plugins in this category",
-    "unknownAuthor": "Unknown author",
-    "priorityHint": "Plugins higher in the list are searched first.",
-    "priority": "Position {{value}}",
-    "moveUp": "Raise priority",
-    "moveDown": "Lower priority",
     "installedAt": "Installed {{value}}",
-    "updatedAt": "Updated {{value}}",
-    "types": {
-      "aggregated": "All-in-one",
-      "metadata": "Metadata",
-      "lyrics": "Lyrics",
-      "covers": "Artwork"
-    },
-    "conflicts": {
-      "new": "New",
-      "update": "Update",
-      "overwrite": "Reinstall",
-      "downgrade": "Downgrade"
-    },
-    "invalidPlugin": "Cannot install"
+    "updatedAt": "Updated {{value}}"
   }
 }

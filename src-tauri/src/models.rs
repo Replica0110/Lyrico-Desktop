@@ -114,6 +114,7 @@ pub(crate) struct StorageInfo {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BatchTask {
+    pub(crate) progress: f64,
     pub(crate) task_id: String,
     pub(crate) task_type: String,
     pub(crate) status: String,

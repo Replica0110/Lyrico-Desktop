@@ -1,7 +1,9 @@
-import { Checkbox, Form, Select, Space, Switch, Typography } from "antd";
+import { Button, Checkbox, Flex, Form, Input, Select, Space, Switch, Typography } from "antd";
+import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ArtistSplitConfig } from "../app/types";
-import { builtinArtistSeparators, builtinNoSplitArtists } from "../domain/library";
+import { builtinArtistSeparators } from "../domain/library";
 
 const { Text } = Typography;
 
@@ -17,9 +19,13 @@ export function ArtistSplitSettings({
     .filter((item) => !config.hiddenBuiltinSeparatorIds.includes(item.id))
     .filter((item) => config.builtinSeparatorOverrides[item.id] ?? item.defaultEnabled)
     .map((item) => item.id);
-  const enabledBuiltinNoSplitArtists = builtinNoSplitArtists
-    .filter((item) => config.builtinNoSplitArtistOverrides[item.id] ?? item.defaultEnabled)
-    .map((item) => item.id);
+  const [artistName, setArtistName] = useState("");
+  function addArtist() {
+    const name = artistName.trim();
+    if (!name || config.customNoSplitArtists.some(item => normalizeArtist(item.name) === normalizeArtist(name))) return;
+    onChange({ ...config, customNoSplitArtists: [...config.customNoSplitArtists, { id: createId(), name, enabled: true }] });
+    setArtistName("");
+  }
 
   return (
     <Space orientation="vertical" size={20} className="full-width">
@@ -78,43 +84,15 @@ export function ArtistSplitSettings({
           />
         </Form.Item>
 
-        <Form.Item label={t("artistSplit.builtinNoSplit")} extra={t("artistSplit.noSplitHint")}>
-          <Checkbox.Group
-            value={enabledBuiltinNoSplitArtists}
-            onChange={(values) => {
-              const enabledIds = new Set(values.map(String));
-              onChange({
-                ...config,
-                builtinNoSplitArtistOverrides: Object.fromEntries(
-                  builtinNoSplitArtists.map((item) => [item.id, enabledIds.has(item.id)]),
-                ),
-              });
-            }}
-          >
-            <Space wrap>
-              {builtinNoSplitArtists.map((item) => <Checkbox key={item.id} value={item.id}>{item.name}</Checkbox>)}
-            </Space>
-          </Checkbox.Group>
-        </Form.Item>
-
-        <Form.Item label={t("artistSplit.customNoSplit")} extra={t("artistSplit.customNoSplitHint")}>
-          <Select
-            mode="tags"
-            value={config.customNoSplitArtists.filter((item) => item.enabled).map((item) => item.name)}
-            placeholder={t("artistSplit.customNoSplitPlaceholder")}
-            onChange={(values) => {
-              const normalizedValues = uniqueNonBlank(values);
-              onChange({
-                ...config,
-                customNoSplitArtists: normalizedValues.map((name) => {
-                  const existing = config.customNoSplitArtists.find(
-                    (item) => normalizeArtist(item.name) === normalizeArtist(name),
-                  );
-                  return existing ? { ...existing, enabled: true } : { id: createId(), name, enabled: true };
-                }),
-              });
-            }}
-          />
+        <Form.Item label={t("artistSplit.noSplit")} extra={t("artistSplit.customNoSplitHint")}>
+          <div className="artist-rule-list">
+            {config.customNoSplitArtists.map(item => <Flex key={item.id} align="center" gap={8}>
+              <Input aria-label={t("artistSplit.noSplit")} value={item.name} onChange={event => onChange({ ...config, customNoSplitArtists: config.customNoSplitArtists.map(rule => rule.id === item.id ? { ...rule, name: event.target.value } : rule) })} />
+              <Switch size="small" aria-label={item.name} checked={item.enabled} onChange={enabled => onChange({ ...config, customNoSplitArtists: config.customNoSplitArtists.map(rule => rule.id === item.id ? { ...rule, enabled } : rule) })} />
+              <Button type="text" danger icon={<DeleteOutlined />} aria-label={t("common.remove")} onClick={() => onChange({ ...config, customNoSplitArtists: config.customNoSplitArtists.filter(rule => rule.id !== item.id) })} />
+            </Flex>)}
+            <Flex gap={8}><Input value={artistName} placeholder={t("artistSplit.customNoSplitPlaceholder")} onChange={event => setArtistName(event.target.value)} onPressEnter={addArtist} /><Button icon={<PlusOutlined />} disabled={!artistName.trim()} onClick={addArtist}>{t("common.add")}</Button></Flex>
+          </div>
         </Form.Item>
       </Form>
     </Space>

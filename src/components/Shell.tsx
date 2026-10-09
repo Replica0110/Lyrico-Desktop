@@ -1,5 +1,5 @@
 import {
-  ArrowLeftOutlined,
+  SearchOutlined,
   AppstoreOutlined,
   CloudSyncOutlined,
   CustomerServiceOutlined,
@@ -12,10 +12,15 @@ import {
   TagsOutlined,
   TeamOutlined,
 } from "@ant-design/icons";
-import { Badge, Button, Empty, Flex, Layout, Tooltip, Typography } from "antd";
+import { Badge, Button, Flex, Input, Layout, Tooltip, Typography } from "antd";
 import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { AudioTrack, LibraryFolder, ReplayGainProgress, ScanProgress, ViewKey } from "../app/types";
+import { EmptyState } from "./EmptyState";
+import { SubPageBar } from "./SubPageBar";
+import { TrackArtwork } from "./TrackArtwork";
+import { filterTracks } from "../domain/library";
+import { formatDuration } from "../utils/format";
 import { useReplayGainProgress } from "../hooks/useReplayGainProgress";
 import { useVirtualizedRows } from "../hooks/useVirtualizedRows";
 
@@ -81,19 +86,17 @@ export const Shell = memo(function Shell({
     <Layout className="app-shell">
       <Sider
         className="side-panel"
-        width={244}
-        collapsedWidth={76}
+        width="var(--nav-width)"
+        collapsedWidth="var(--nav-collapsed-width)"
         collapsed={collapsed}
-        breakpoint="lg"
         trigger={null}
-        onBreakpoint={setCollapsed}
       >
         <nav className="side-navigation" aria-label={t("nav.primary")}>
           {navigationGroups.map((group) => <section className="side-nav-group" key={group.label}>
             {!collapsed ? <Text className="side-nav-label" type="secondary">{group.label}</Text> : null}
             <div className="side-nav-items">
               {group.items.map((item) => <Tooltip key={item.key} title={collapsed ? item.label : undefined} placement="right">
-                <button className={`side-nav-item${activeView === item.key ? " is-active" : ""}`} type="button" onClick={() => handleChangeView(item.key as ViewKey)}>
+                <button className={`side-nav-item${activeView === item.key ? " is-active" : ""}`} type="button" aria-label={item.label} aria-current={!selectionPageOpen && activeView === item.key ? "page" : undefined} onClick={() => handleChangeView(item.key as ViewKey)}>
                   <span className="side-nav-icon">{item.icon}</span>
                   {!collapsed ? <span>{item.label}</span> : null}
                 </button>
@@ -103,11 +106,6 @@ export const Shell = memo(function Shell({
         </nav>
 
         <div className="side-footer">
-          {!collapsed && (
-            <div className="side-library-summary">
-              <Text type="secondary">{t("nav.librarySummary", { tracks: trackCount, folders: folders.length })}</Text>
-            </div>
-          )}
           <Tooltip title={collapsed ? t("common.settings") : undefined} placement="right">
             <Button
               type="text"
@@ -125,7 +123,7 @@ export const Shell = memo(function Shell({
               aria-label={t("selection.showSelected")}
               className="side-action-button side-selection-button"
               icon={
-                <Badge count={selectedTracks.length} size="small" overflowCount={99} color="#1677ff" offset={[5, -3]}>
+                <Badge count={collapsed ? selectedTracks.length : 0} size="small" overflowCount={99} color="var(--ant-color-primary)" offset={[5, -3]}>
                   <UnorderedListOutlined />
                 </Badge>
               }
@@ -134,7 +132,7 @@ export const Shell = memo(function Shell({
               {!collapsed && (
                 <span className="side-action-label">
                   <span className="side-action-text">{t("selection.selectedSongs")}</span>
-                  <Badge count={selectedTracks.length} showZero overflowCount={99} color="#1677ff" />
+                  <Badge count={selectedTracks.length} showZero overflowCount={99} color="var(--ant-color-primary)" />
                 </span>
               )}
             </Button>
@@ -167,40 +165,61 @@ export const Shell = memo(function Shell({
             setSelectionPageOpen(false);
             onOpenSelectedBatch();
           }}
+          onBrowse={() => handleChangeView("songs")}
         /></div> : null}
         </Content>
+        <footer className="app-statusbar"><Text type="secondary">{t("nav.librarySummary", { tracks: trackCount, folders: folders.length })}</Text></footer>
       </Layout>
     </Layout>
   );
 });
 
-function SelectionPage({ tracks, onClose, onRemove, onClear, onOpenBatch }: { tracks: AudioTrack[]; onClose: () => void; onRemove: (path: string) => void; onClear: () => void; onOpenBatch: () => void }) {
+function SelectionPage({ tracks, onClose, onRemove, onClear, onOpenBatch, onBrowse }: { tracks: AudioTrack[]; onClose: () => void; onRemove: (path: string) => void; onClear: () => void; onOpenBatch: () => void; onBrowse: () => void }) {
   const { t } = useTranslation();
+  const [query, setQuery] = useState("");
+  const filtered = useMemo(() => filterTracks(tracks, query), [tracks, query]);
   const {
     rowsRef,
     startIndex,
     endIndex,
     topSpacerHeight,
     bottomSpacerHeight,
-  } = useVirtualizedRows(tracks.length, 58, 6);
-  const visibleTracks = tracks.slice(startIndex, endIndex);
+  } = useVirtualizedRows(filtered.length, 58, 6);
+  const visibleTracks = filtered.slice(startIndex, endIndex);
   return (
-    <div className="workspace page-stack detail-subpage selection-page">
-      <header className="subpage-toolbar">
-        <Button type="text" icon={<ArrowLeftOutlined />} onClick={onClose}>{t("common.back")}</Button>
-        <Text strong>{t("selection.drawerTitle", { count: tracks.length })}</Text>
-      </header>
-      {tracks.length ? <div className="selection-dialog-list">
-        <div ref={rowsRef} className="selection-dialog-list-content">
-          {topSpacerHeight > 0 ? <div style={{ height: topSpacerHeight }} aria-hidden="true" /> : null}
-          {visibleTracks.map((track) => <div className="selection-dialog-row" key={track.path}>
-            <div className="track-title-cell"><Text strong ellipsis={{ tooltip: track.title || track.fileName }}>{track.title || track.fileName}</Text><Text type="secondary" ellipsis={{ tooltip: track.artist }}>{track.artist || t("common.unknownArtist")}</Text></div>
-            <Tooltip title={t("common.remove")}><Button type="text" danger aria-label={t("common.remove")} icon={<DeleteOutlined />} onClick={() => onRemove(track.path)} /></Tooltip>
-          </div>)}
-          {bottomSpacerHeight > 0 ? <div style={{ height: bottomSpacerHeight }} aria-hidden="true" /> : null}
-        </div>
-      </div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("selection.empty")} />}
-      <footer className="selection-page-footer"><Flex justify="space-between" gap={12}><Button disabled={tracks.length === 0} onClick={onClear}>{t("selection.clear")}</Button><Button type="primary" disabled={tracks.length === 0} onClick={onOpenBatch}>{t("selection.batch")}</Button></Flex></footer>
+    <div className="page-shell selection-page">
+      <SubPageBar
+        backLabel={t("common.back")}
+        onBack={onClose}
+        label={t("selection.showSelected")}
+        items={[{ key: "selection", label: t("selection.drawerTitle", { count: tracks.length }) }]}
+        actions={<>
+          <Input allowClear prefix={<SearchOutlined />} className="selection-search" aria-label={t("selection.search")} placeholder={t("selection.search")} value={query} onChange={event => setQuery(event.target.value)} />
+          <Button disabled={tracks.length === 0} onClick={onClear}>{t("selection.clear")}</Button>
+          <Button type="primary" disabled={tracks.length === 0} onClick={onOpenBatch}>{t("selection.batch")}</Button>
+        </>}
+      />
+      <div className="page-body selection-body">
+        {filtered.length ? <div className="selection-list">
+          <div ref={rowsRef} className="selection-list-content">
+            {topSpacerHeight > 0 ? <div style={{ height: topSpacerHeight }} aria-hidden="true" /> : null}
+            {visibleTracks.map((track) => <div className="row selection-row" key={track.path}>
+              <TrackArtwork track={track} size={36} /><div className="track-title-cell"><Text strong ellipsis={{ tooltip: track.title || track.fileName }}>{track.title || track.fileName}</Text><Text type="secondary" ellipsis={{ tooltip: track.artist }}>{track.artist || t("common.unknownArtist")}</Text></div>
+              <Text type="secondary" className="selection-duration">{formatDuration(track.durationSeconds)}</Text>
+              <Tooltip title={track.path}><Text className="selection-album" type="secondary" ellipsis>{track.album}</Text></Tooltip>
+              <div className="row-actions"><Tooltip title={t("common.remove")}><Button type="text" danger aria-label={t("common.remove")} icon={<DeleteOutlined />} onClick={() => onRemove(track.path)} /></Tooltip></div>
+            </div>)}
+            {bottomSpacerHeight > 0 ? <div style={{ height: bottomSpacerHeight }} aria-hidden="true" /> : null}
+          </div>
+        </div> : (
+          <EmptyState
+            description={t(tracks.length ? "songs.noResults" : "selection.empty")}
+            action={tracks.length
+              ? <Button onClick={() => setQuery("")}>{t("songs.clearSearch")}</Button>
+              : <Button type="primary" onClick={onBrowse}>{t("selection.enter")}</Button>}
+          />
+        )}
+      </div>
     </div>
   );
 }

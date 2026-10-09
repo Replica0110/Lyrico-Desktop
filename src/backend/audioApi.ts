@@ -146,8 +146,8 @@ export async function getStorageInfo() {
   return invoke<StorageInfo>("get_storage_info");
 }
 
-export async function analyzeReplayGain(path: string, jobId: string) {
-  return invoke<ReplayGainAnalysis>("analyze_replay_gain", { path, jobId });
+export async function analyzeReplayGain(path: string, jobId: string, targetLoudnessLufs: number, peakMode: DesktopSettings["replayGainPeakMode"]) {
+  return invoke<ReplayGainAnalysis>("analyze_replay_gain", { path, jobId, targetLoudnessLufs, peakMode });
 }
 
 export async function cancelReplayGain(jobId: string) {

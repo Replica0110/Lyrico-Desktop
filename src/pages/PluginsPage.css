@@ -1,0 +1,358 @@
+/* Plugins page — layout contract: docs/ui-layout.md §9.3.
+   Colors, radii and sizes come from the tokens in src/App.css. */
+
+/* Full-height page (same pattern as .settings-view): the two columns scroll
+   internally, so the viewport itself never grows a scrollbar. */
+.plugin-page {
+  height: 100%;
+  min-width: 0;
+}
+
+.plugin-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.plugin-body-empty {
+  justify-content: center;
+}
+
+/* One bordered container, two columns: rail + detail, split by a 1px line. */
+.plugin-layout {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: clip;
+  border: 1px solid var(--border-color);
+  border-radius: var(--surface-radius);
+  background: var(--bg-secondary);
+}
+
+/* The rail is a Panel without its own frame: the layout owns the frame. */
+.plugin-layout .plugin-list-panel {
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  border-inline-end: 1px solid var(--border-color);
+  border-radius: 0;
+  background: transparent;
+}
+
+.plugin-list-body {
+  padding: 4px;
+}
+
+/* List row: icon + two text lines (name, capability summary), never wraps. */
+.plugin-item {
+  display: flex;
+  align-items: center;
+  gap: var(--list-gap);
+  width: 100%;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--surface-radius);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.plugin-item:hover {
+  background: var(--hover-bg);
+}
+
+.plugin-item.is-active {
+  color: var(--ant-color-primary);
+  background: var(--ant-color-primary-bg);
+}
+
+.plugin-item:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: -2px;
+}
+
+.plugin-item .ant-avatar {
+  flex: 0 0 auto;
+  border-radius: var(--surface-radius);
+}
+
+.plugin-item-copy {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.plugin-item-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-item-meta {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-item.is-active .plugin-item-meta {
+  color: inherit;
+  opacity: 0.75;
+}
+
+/* Right column: fixed detail header, scrolling detail body. */
+.plugin-detail {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.plugin-detail-empty {
+  justify-content: center;
+}
+
+.plugin-detail-header {
+  display: flex;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: var(--bar-height);
+  padding: 0 var(--page-padding);
+  align-items: center;
+  gap: var(--list-gap);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.plugin-detail-header .ant-avatar {
+  flex: 0 0 auto;
+  border-radius: var(--surface-radius);
+}
+
+.plugin-detail-name {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-version {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.plugin-detail-actions {
+  display: flex;
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  align-items: center;
+  gap: var(--list-gap);
+}
+
+.plugin-detail-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 12px var(--page-padding) var(--page-padding);
+  overflow: auto;
+}
+
+.plugin-description {
+  max-width: 760px;
+  margin: 0 0 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.plugin-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--list-gap);
+}
+
+.plugin-tags .ant-tag {
+  margin: 0;
+}
+
+.plugin-timestamps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--list-gap) 16px;
+  margin: 12px 0 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.plugin-tabs {
+  min-width: 0;
+  margin-top: 8px;
+}
+
+.plugin-tabs .ant-tabs-nav {
+  margin-bottom: 12px;
+}
+
+.plugin-config-form {
+  max-width: 640px;
+}
+
+.plugin-config-form .ant-form-item {
+  margin-bottom: 16px;
+}
+
+.plugin-config-form .ant-input,
+.plugin-config-form .ant-input-affix-wrapper,
+.plugin-config-form .ant-input-number,
+.plugin-config-form .ant-select {
+  width: 100%;
+}
+
+/* Save stays reachable: pinned to the bottom of .plugin-detail-body, which is
+   the scrollport (.plugin-detail-body has overflow: auto and no ancestor between
+   it and the footer clips or scrolls). */
+.plugin-config-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 0;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.plugin-manifest {
+  max-width: 100%;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--surface-radius);
+  background: var(--code-bg);
+  color: var(--text-secondary);
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Markdown config field: read-only help text from the plugin manifest. */
+.plugin-markdown {
+  max-width: 640px;
+  margin-bottom: 24px;
+}
+
+.plugin-markdown-heading {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.plugin-markdown-body {
+  padding: 12px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--surface-radius);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.plugin-markdown-body > :first-child {
+  margin-top: 0;
+}
+
+.plugin-markdown-body > :last-child {
+  margin-bottom: 0;
+}
+
+.plugin-markdown-body code {
+  padding: 1px 5px;
+  border-radius: var(--surface-radius);
+  background: var(--code-bg);
+}
+
+.plugin-markdown-body a {
+  color: var(--ant-color-primary);
+}
+
+/* Narrow windows: shrink the rail instead of overflowing the page, drop the
+   capability line, and wrap text instead of cutting it off (docs/ui-layout.md
+   line 220: the plugin name must stay readable). */
+@media (max-width: 900px) {
+  .plugin-layout {
+    grid-template-columns: 208px minmax(0, 1fr);
+  }
+
+  .plugin-item-meta {
+    display: none;
+  }
+
+  /* Rail name: up to two full lines, never a horizontal ellipsis. */
+  .plugin-item-name {
+    display: -webkit-box;
+    overflow: hidden;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  /* Detail header: the actions take a row of their own so the name keeps the
+     width of the first row. */
+  .plugin-detail-header {
+    flex-wrap: wrap;
+    row-gap: 4px;
+    padding-block: 4px;
+  }
+
+  .plugin-detail-name {
+    flex: 1 1 auto;
+  }
+
+  .plugin-detail-actions {
+    flex: 1 1 100%;
+    margin-inline-start: 0;
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 780px) {
+  .plugin-layout {
+    grid-template-columns: 168px minmax(0, 1fr);
+  }
+
+  /* Tighten the row so a one-word plugin name still fits the rail. */
+  .plugin-item {
+    gap: 6px;
+    padding: 2px 4px;
+  }
+
+  .plugin-detail-header {
+    padding: 0 12px;
+  }
+
+  .plugin-detail-body {
+    padding: 8px 12px 12px;
+  }
+}

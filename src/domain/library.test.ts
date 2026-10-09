@@ -16,9 +16,13 @@ describe("splitArtists", () => {
   });
 
   it("supports optional ampersand splitting and the no-split allowlist", () => {
-    const splitConfig = config({ builtinSeparatorOverrides: { ampersand: true } });
+    const splitConfig = config({ builtinSeparatorOverrides: { ampersand: true }, customNoSplitArtists: [{ id: "duo", name: "Simon & Garfunkel", enabled: true }] });
     expect(splitArtists("A & B", splitConfig)).toEqual(["A", "B"]);
     expect(splitArtists("Simon & Garfunkel", splitConfig)).toEqual(["Simon & Garfunkel"]);
+  });
+
+  it("does not inject a built-in artist allowlist", () => {
+    expect(splitArtists("Simon & Garfunkel", config({ builtinSeparatorOverrides: { ampersand: true } }))).toEqual(["Simon", "Garfunkel"]);
   });
 
   it("supports custom separators", () => {

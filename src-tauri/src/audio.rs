@@ -174,7 +174,7 @@ fn mutate(
     edit: impl FnOnce(&mut File) -> Result<(), String>,
 ) -> Result<AudioTrack, String> {
     crate::file_mutation::write_copy(path, |temporary| {
-        let mut file = File::open(temporary, false)?;
+        let mut file = File::open_writable(temporary)?;
         edit(&mut file)?;
         file.save()?;
         drop(file);
@@ -333,10 +333,12 @@ pub(crate) fn write_replay_gain_tags(
     artist_separator: &str,
     track_gain: String,
     track_peak: String,
+    reference_loudness: String,
 ) -> Result<AudioTrack, String> {
     mutate(path, artist_separator, ArtworkMode::None, |file| {
         set_text(file, "REPLAYGAIN_TRACK_GAIN", &track_gain)?;
-        set_text(file, "REPLAYGAIN_TRACK_PEAK", &track_peak)
+        set_text(file, "REPLAYGAIN_TRACK_PEAK", &track_peak)?;
+        set_text(file, "REPLAYGAIN_REFERENCE_LOUDNESS", &reference_loudness)
     })
 }
 pub(crate) fn read_custom_tags(path: &Path) -> Result<Vec<CustomTag>, String> {
@@ -511,6 +513,31 @@ mod tests {
         value["removeCover"] = serde_json::json!(false);
         serde_json::from_value(value).unwrap()
     }
+    #[test]
+    fn simultaneous_metadata_and_custom_tag_reads_share_the_file() {
+        let fixture = Fixture::copy("silence-44-s.flac");
+        let held = File::open(&fixture.0, true).unwrap();
+        let tags = read_custom_tags(&fixture.0).expect("custom tags can be read while the detail reader is open");
+        assert!(held.audio_properties().is_ok());
+        drop(tags);
+    }
+
+    #[test]
+    #[ignore = "read-only audit of an explicitly configured local audio directory"]
+    fn reads_local_library_without_modifying_files() {
+        let directory = std::env::var("LYRICO_AUDIO_AUDIT_DIR").unwrap();
+        let mut count = 0;
+        for entry in walkdir::WalkDir::new(directory).into_iter().filter_map(Result::ok) {
+            if !entry.file_type().is_file() || !is_audio_path(entry.path()) { continue; }
+            let first = File::open(entry.path(), true).unwrap_or_else(|error| panic!("{}: {error}", entry.path().display()));
+            let _tags = read_custom_tags(entry.path()).unwrap_or_else(|error| panic!("{}: {error}", entry.path().display()));
+            assert!(first.audio_properties().is_ok());
+            count += 1;
+        }
+        assert!(count > 0);
+        println!("Read-only metadata audit: {count} files");
+    }
+
     #[test]
     fn single_save_roundtrips_cover_custom_values_and_metadata() {
         let image = image::DynamicImage::new_rgb8(2, 2);

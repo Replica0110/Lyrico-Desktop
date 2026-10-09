@@ -1,6 +1,6 @@
 import { DeleteOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, SearchOutlined, ShareAltOutlined } from "@ant-design/icons";
-import { Alert, Avatar, Button, Checkbox, Collapse, Descriptions, Drawer, Empty, Flex, Form, Input, InputNumber, List, Modal, Progress, Rate, Segmented, Select, Space, Spin, Tabs, Typography } from "antd";
-import type { CollapseProps, FormInstance } from "antd";
+import { Alert, Avatar, Button, Checkbox, Descriptions, Drawer, Empty, Flex, Form, Input, InputNumber, List, Modal, Progress, Rate, Segmented, Select, Space, Spin, Tabs, Typography } from "antd";
+import type { FormInstance } from "antd";
 import type { TFunction } from "i18next";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -15,7 +15,7 @@ import { RemoteArtwork } from "./RemoteArtwork";
 import { useRemoteImage } from "../hooks/useRemoteImage";
 import { useReplayGainProgress } from "../hooks/useReplayGainProgress";
 import { defaultOnlineSearchKeyword } from "../domain/search";
-import { normalizeEditFieldOrder } from "../domain/editFieldSettings";
+import { normalizeEditFieldOrder, EDIT_FIELD_LABEL_KEYS } from "../domain/editFieldSettings";
 
 const { Text } = Typography;
 
@@ -94,7 +94,7 @@ export function SongDetails({
       }
     >
       {loading ? (
-        <div className="drawer-loading"><Spin tip={t("details.loading")} /></div>
+        <div className="drawer-loading"><Spin description={t("details.loading")} /></div>
       ) : !track ? (
         <Form form={form} component={false} />
       ) : (
@@ -153,7 +153,7 @@ function FileInformation({ track }: { track: AudioTrack }) {
         { key: "channels", label: t("details.channels"), children: track.channels ? `${track.channels} ch` : "—" },
         { key: "title", label: t("details.titleField"), children: track.title || "—" },
         { key: "artist", label: t("details.artist"), children: track.artist || "—" },
-        { key: "album", label: t("details.album"), children: track.album || "—" },
+        { key: "album", label: t("details.album"), span: 2, children: track.album || "—" },
         { key: "path", label: t("details.file"), span: 2, children: <Text type="secondary" copyable={{ text: track.path }} className="file-path">{track.path}</Text> },
       ]}
     />
@@ -529,8 +529,8 @@ function OnlineMatch({ track, plugins, settings, form, onApplied }: { track: Aud
                   title={title}
                   description={<Space size={6} wrap>
                     <Text type="secondary">{Array.isArray(artist) ? artist.join("/") : artist}</Text>
-                    <Text type="secondary">· {t("details.lyricsCandidateCount", { total: entry.candidates.length })}</Text>
-                    {resultTab === "all" ? <Text type="secondary">· {plugin?.name}</Text> : null}
+                    <Text type="secondary">{t("details.lyricsCandidateCount", { total: entry.candidates.length })}</Text>
+                    {resultTab === "all" ? <Text type="secondary">{plugin?.name}</Text> : null}
                   </Space>}
                 />
               </List.Item>
@@ -550,8 +550,8 @@ function OnlineMatch({ track, plugins, settings, form, onApplied }: { track: Aud
                   title={title}
                   description={<Space size={6} wrap>
                     <Text type="secondary">{Array.isArray(artist) ? artist.join("/") : artist}</Text>
-                    {result.album || result.albumName ? <Text type="secondary">· {result.album ?? result.albumName}</Text> : null}
-                    {resultTab === "all" ? <Text type="secondary">· {plugin?.name}</Text> : null}
+                    {result.album || result.albumName ? <Text type="secondary">{result.album ?? result.albumName}</Text> : null}
+                    {resultTab === "all" ? <Text type="secondary">{plugin?.name}</Text> : null}
                   </Space>}
                 />
               </List.Item>
@@ -568,7 +568,7 @@ function OnlineMatch({ track, plugins, settings, form, onApplied }: { track: Aud
               cover ? <Button key="cover" type="link" onClick={() => openCoverReview(entry)}>{t("details.reviewCover")}</Button> : null,
               canFetchLyrics ? <Button key="lyrics" type="link" loading={busyResult === `lyrics:${entry.pluginId}:${resultId(result)}`} onClick={() => void openLyricsReview(entry)}>{t("details.reviewLyrics")}</Button> : null,
             ].filter(Boolean)}>
-              <List.Item.Meta avatar={<RemoteArtwork size={48} url={cover} />} title={title} description={<Space size={6} wrap><Text type="secondary">{`${Array.isArray(artist) ? artist.join("/") : artist}${result.album || result.albumName ? ` · ${result.album ?? result.albumName}` : ""}`}</Text>{resultTab === "all" ? <Text type="secondary">· {plugin?.name}</Text> : null}</Space>} />
+              <List.Item.Meta avatar={<RemoteArtwork size={48} url={cover} />} title={title} description={<Space size={6} wrap><Text type="secondary">{`${Array.isArray(artist) ? artist.join("/") : artist}${result.album || result.albumName ? `, ${result.album ?? result.albumName}` : ""}`}</Text>{resultTab === "all" ? <Text type="secondary">{plugin?.name}</Text> : null}</Space>} />
             </List.Item>
           );
         }}
@@ -596,7 +596,7 @@ function OnlineMatch({ track, plugins, settings, form, onApplied }: { track: Aud
               size="small"
               column={2}
               items={[
-                { key: "id", label: t("details.sourceId"), children: `${plugins.find((plugin) => plugin.id === reviewPluginId)?.name ?? ""} · ${resultId(reviewResult)}` },
+                { key: "id", label: t("details.sourceId"), children: `${plugins.find((plugin) => plugin.id === reviewPluginId)?.name ?? ""}, ${resultId(reviewResult)}` },
                 { key: "duration", label: t("table.duration"), children: resultDuration(reviewResult) },
               ]}
             />
@@ -844,7 +844,6 @@ function tagFieldLabel(key: keyof TagForm, t: TFunction) {
 function LocalTagEditor({ form, settings, replayGainProgress, onCalculateReplayGain, onCancelReplayGain, onImportLyrics, onExportLyrics }: { form: FormInstance<TagForm>; settings: DesktopSettings; replayGainProgress?: ReplayGainProgress; onCalculateReplayGain: () => void; onCancelReplayGain: () => void; onImportLyrics: () => void; onExportLyrics: () => void }) {
   const { t } = useTranslation();
   const showField = (key: string) => settings.editFieldVisibility?.[key] !== false;
-  const groupVisible = (keys: string[]) => keys.some((key) => showField(key));
   const [plainLyricsOpen, setPlainLyricsOpen] = useState(false);
   const [plainLyrics, setPlainLyrics] = useState("");
   const [lyricsProcessingAction, setLyricsProcessingAction] = useState<number | "removeEmpty" | "plain">();
@@ -888,107 +887,7 @@ function LocalTagEditor({ form, settings, replayGainProgress, onCalculateReplayG
       if (request === lyricsProcessRequest.current) setLyricsProcessingAction(undefined);
     }
   }
-  const collapseItems: CollapseProps["items"] = [];
-  if (groupVisible(["title", "artist", "albumArtist", "album", "year", "language", "genre"])) {
-    collapseItems.push({
-      key: "basic",
-      label: t("details.groups.basic"),
-      children: (
-        <>
-          {showField("title") ? <Form.Item name="title" label={t("details.titleField")}><Input /></Form.Item> : null}
-          {showField("artist") || showField("albumArtist") ? (
-            <Flex gap={12} wrap>
-              {showField("artist") ? <Form.Item name="artist" label={t("details.artist")} className="half-field"><Input /></Form.Item> : null}
-              {showField("albumArtist") ? <Form.Item name="albumArtist" label={t("details.albumArtist")} className="half-field"><Input /></Form.Item> : null}
-            </Flex>
-          ) : null}
-          {showField("album") || showField("year") || showField("language") ? (
-            <Flex gap={12} wrap>
-              {showField("album") ? <Form.Item name="album" label={t("details.album")} className="half-field"><Input /></Form.Item> : null}
-              {showField("year") ? <Form.Item name="year" label={t("details.year")} className="quarter-field"><Input /></Form.Item> : null}
-              {showField("language") ? <Form.Item name="language" label={t("details.language")} className="quarter-field"><Input placeholder="zho / eng / jpn" /></Form.Item> : null}
-            </Flex>
-          ) : null}
-          {showField("genre") ? (
-            <Form.Item name="genre" label={t("details.genre")}>
-              <Select mode="tags" tokenSeparators={[";", "/", ","]} open={false} placeholder={t("details.genreHint")} />
-            </Form.Item>
-          ) : null}
-        </>
-      ),
-    });
-  }
-  if (groupVisible(["trackNumber", "discNumber"])) {
-    collapseItems.push({
-      key: "track",
-      label: t("details.groups.track"),
-      children: (
-        <Flex gap={12} wrap>
-          {showField("trackNumber") ? <Form.Item name="trackNumber" label={t("details.track")} className="compact-field"><InputNumber min={1} precision={0} className="full-width" /></Form.Item> : null}
-          {showField("discNumber") ? <Form.Item name="discNumber" label={t("details.disc")} className="compact-field"><InputNumber min={1} precision={0} className="full-width" /></Form.Item> : null}
-        </Flex>
-      ),
-    });
-  }
-  if (groupVisible(["composer", "lyricist", "copyright", "comment"])) {
-    collapseItems.push({
-      key: "credits",
-      label: t("details.groups.credits"),
-      children: (
-        <>
-          {showField("composer") || showField("lyricist") ? (
-            <Flex gap={12} wrap>
-              {showField("composer") ? <Form.Item name="composer" label={t("details.composer")} className="half-field"><Input /></Form.Item> : null}
-              {showField("lyricist") ? <Form.Item name="lyricist" label={t("details.lyricist")} className="half-field"><Input /></Form.Item> : null}
-            </Flex>
-          ) : null}
-          {showField("copyright") ? <Form.Item name="copyright" label={t("details.copyright")}><Input /></Form.Item> : null}
-          {showField("comment") ? <Form.Item name="comment" label={t("details.comment")}><Input /></Form.Item> : null}
-        </>
-      ),
-    });
-  }
-  collapseItems.push({
-    key: "customTags",
-    label: t("details.groups.customTags"),
-    children: (
-      <Form.Item name="customTags" noStyle>
-        <CustomTagsEditor />
-      </Form.Item>
-    ),
-  });
-  collapseItems.push({
-    key: "replaygain",
-    label: t("details.groups.replayGain"),
-    children: (
-      <>
-        <Flex align="center" gap={12} className="replay-gain-actions">
-          {replayGainProgress?.status === "running" ? (
-            <Button danger onClick={onCancelReplayGain}>{t("common.cancel")}</Button>
-          ) : (
-            <Button onClick={onCalculateReplayGain}>{t("replayGain.calculate")}</Button>
-          )}
-          {replayGainProgress?.status === "running" && <Progress percent={replayGainProgress.percent} size="small" className="replay-gain-progress" />}
-        </Flex>
-        <Flex gap={12} wrap>
-          {showField("replayGainTrackGain") ? <Form.Item name="replayGainTrackGain" label={t("tasks.trackGain")} className="half-field"><Input placeholder="-8.50 dB" /></Form.Item> : null}
-          {showField("replayGainTrackPeak") ? <Form.Item name="replayGainTrackPeak" label={t("tasks.trackPeak")} className="half-field"><Input placeholder="0.980000" /></Form.Item> : null}
-          {showField("replayGainAlbumGain") ? <Form.Item name="replayGainAlbumGain" label={t("tasks.albumGain")} className="half-field"><Input placeholder="-7.20 dB" /></Form.Item> : null}
-          {showField("replayGainAlbumPeak") ? <Form.Item name="replayGainAlbumPeak" label={t("tasks.albumPeak")} className="half-field"><Input placeholder="0.950000" /></Form.Item> : null}
-        </Flex>
-        {showField("replayGainReferenceLoudness") ? (
-          <Form.Item name="replayGainReferenceLoudness" label={t("details.referenceLoudness")} extra={t("details.referenceLoudnessPending")}>
-            <Input disabled placeholder="-18 LUFS" />
-          </Form.Item>
-        ) : null}
-      </>
-    ),
-  });
-  collapseItems.push({
-    key: "lyrics",
-    label: t("details.groups.lyrics"),
-    children: (
-      <>
+  const lyricsEditor = <>
         {lyricsError ? <Alert type="error" showIcon closable message={lyricsError} onClose={() => setLyricsError(undefined)} /> : null}
         <Space wrap className="lyrics-actions">
           <Button disabled={lyricsProcessing} onClick={onImportLyrics}>{t("lyrics.import")}</Button>
@@ -1002,25 +901,30 @@ function LocalTagEditor({ form, settings, replayGainProgress, onCalculateReplayG
           <Button loading={lyricsProcessingAction === "plain"} disabled={!currentLyrics.trim() || lyricsProcessing} onClick={() => void openPlainLyrics()}>{t("lyrics.plainText")}</Button>
         </Space>
         {showField("lyrics") ? <Form.Item name="lyrics" label={t("details.lyrics")}><Input.TextArea autoSize={{ minRows: 8, maxRows: 18 }} /></Form.Item> : null}
-      </>
-    ),
-  });
-  if (showField("rating")) {
-    collapseItems.push({
-      key: "cover",
-      label: t("details.groups.cover"),
-      children: <Form.Item name="rating" label={t("details.rating")} className="rating-field"><Rate /></Form.Item>,
-    });
+      </>;
+  const visibleFields = normalizeEditFieldOrder(settings.editFieldOrder).filter(showField);
+  const firstReplayGainField = visibleFields.find(key => key.startsWith("replayGain"));
+  const labels = Object.fromEntries(EDIT_FIELD_LABEL_KEYS);
+  function renderField(key: string) {
+    if (key === "lyrics") return lyricsEditor;
+    if (key === "customTags") return <Form.Item name="customTags" label={t(labels[key])}><CustomTagsEditor /></Form.Item>;
+    if (key === "rating") return <Form.Item name="rating" label={t(labels[key])}><Rate /></Form.Item>;
+    if (key === "genre") return <Form.Item name="genre" label={t(labels[key])}><Select mode="tags" tokenSeparators={[";", "/", ","]} open={false} /></Form.Item>;
+    return <Form.Item name={key} label={t(labels[key])}>
+      {key === "trackNumber" || key === "discNumber" ? <InputNumber min={1} precision={0} className="full-width" /> : <Input readOnly={key === "replayGainReferenceLoudness"} />}
+    </Form.Item>;
   }
-  const orderedCollapseItems = [...collapseItems].sort(
-    (left, right) =>
-      normalizeEditFieldOrder(settings.editFieldOrder).indexOf(String(left?.key)) -
-      normalizeEditFieldOrder(settings.editFieldOrder).indexOf(String(right?.key)),
-  );
   return (
     <>
     <Form form={form} layout="vertical" requiredMark={false} className="tag-form">
-      <Collapse defaultActiveKey={["basic"]} items={orderedCollapseItems} />
+      <div className="tag-field-grid">
+        {visibleFields.map(key => <div key={key} className={`tag-field${["lyrics", "customTags"].includes(key) ? " is-wide" : ""}`}>
+          {key === firstReplayGainField ? <Flex align="center" gap={12} wrap className="replay-gain-actions">
+            {replayGainProgress?.status === "running" ? <><Button danger onClick={onCancelReplayGain}>{t("common.cancel")}</Button><Progress percent={replayGainProgress.percent} size="small" className="replay-gain-progress" /></> : <Button onClick={onCalculateReplayGain}>{t("replayGain.calculate")}</Button>}
+          </Flex> : null}
+          {renderField(key)}
+        </div>)}
+      </div>
     </Form>
     <Modal title={t("lyrics.plainText")} open={plainLyricsOpen} footer={null} onCancel={() => setPlainLyricsOpen(false)}>
       <Input.TextArea value={plainLyrics} readOnly autoSize={{ minRows: 10, maxRows: 20 }} />
@@ -1043,7 +947,7 @@ function CustomTagsEditor({
     onChange?.(next);
   };
   return (
-    <Space direction="vertical" size={10} style={{ width: "100%" }}>
+    <Space orientation="vertical" size={10} style={{ width: "100%" }}>
       {tags.map((tag, index) => (
         <Flex key={index} gap={8} align="start">
           <Input

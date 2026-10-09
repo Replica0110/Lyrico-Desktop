@@ -20,18 +20,15 @@
     "drawerTitle": "已选歌曲（{{count}}）",
     "clear": "清空选择",
     "selectAll": "全选",
-    "hint": "单击切换选择，Ctrl 加选，Shift 连选，双击编辑",
-    "empty": "没有选择歌曲"
+    "selectRow": "选择 {{name}}",
+    "empty": "没有选择歌曲",
+    "search": "搜索已选歌曲"
   },
   "songs": {
+    "noResults": "没有匹配的歌曲",
+    "clearSearch": "清除搜索",
     "title": "歌曲",
-    "description": "浏览歌曲并编辑内嵌标签。",
-    "edit": "编辑标签",
-    "reloadHint": "从磁盘重新读取当前歌曲",
-    "reloadAria": "重新读取当前歌曲",
-    "all": "全部歌曲",
-    "selected": "已选择 {{count}} 首",
-    "empty": "请先添加音乐文件夹"
+    "empty": "尚未添加音乐文件夹"
   },
   "table": {
     "song": "歌曲",
@@ -40,16 +37,12 @@
     "duration": "时长",
     "format": "格式",
     "modifiedAt": "修改时间",
-    "createdAt": "创建时间",
-    "range": "第 {{start}}–{{end}} 项，共 {{total}} 项"
+    "createdAt": "创建时间"
   },
   "sort": {
     "label": "排序",
-    "fieldLabel": "排序字段",
-    "directionLabel": "升降序",
     "asc": "升序",
     "desc": "降序",
-    "toggle": "按{{field}}排序",
     "field": {
       "title": "歌曲",
       "artist": "艺术家",
@@ -62,46 +55,27 @@
       "modifiedAt": "修改时间",
       "createdAt": "创建时间",
       "lastScan": "上次扫描"
-    }
+    },
+    "default": "默认顺序"
   },
   "albums": {
-    "title": "专辑",
-    "description": "按专辑浏览本地音乐库。",
-    "all": "全部专辑",
-    "selected": "已选择 {{count}} 首歌曲",
-    "drawer": "专辑歌曲"
+    "title": "专辑"
   },
   "artists": {
-    "title": "艺术家",
-    "description": "按艺术家浏览本地音乐库。",
-    "all": "全部艺术家",
-    "selected": "已选择 {{count}} 首歌曲",
-    "drawer": "艺术家歌曲"
+    "title": "艺术家"
   },
   "folders": {
     "title": "文件夹",
-    "description": "管理音乐库根目录并浏览各文件夹中的歌曲。",
     "add": "添加文件夹",
-    "configured": "已配置 {{count}} 个",
-    "libraryRoots": "音乐库文件夹",
-    "folder": "文件夹",
-    "lastScan": "上次扫描",
-    "lastScanValue": "上次扫描：{{value}}",
     "rescan": "重新扫描文件夹",
-    "rescanRoot": "扫描根目录",
     "remove": "从音乐库移除",
-    "removeRoot": "移除根目录",
+    "removeConfirm": "将「{{name}}」从音乐库移除？磁盘上的文件不会被删除。",
     "hide": "在音乐库中隐藏",
     "show": "在音乐库中显示",
-    "empty": "添加一个或多个音乐文件夹以建立音乐库。",
-    "tracksTitle": "文件夹歌曲",
-    "includeSubfolders": "包含子文件夹",
-    "currentFolderOnly": "仅当前文件夹",
-    "searchPlaceholder": "搜索当前文件夹",
-    "status": {
-      "ready": "就绪",
-      "scanning": "扫描中",
-      "error": "错误"
-    }
+    "empty": "尚未添加文件夹",
+    "searchPlaceholder": "搜索文件夹",
+    "searchSongs": "搜索歌曲",
+    "allFolders": "所有文件夹",
+    "noContents": "此文件夹没有音频或子文件夹"
   }
 }

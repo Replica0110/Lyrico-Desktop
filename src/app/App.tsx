@@ -37,6 +37,8 @@ import {
   pickSavePath,
   uninstallSourcePlugin,
 } from "../backend/audioApi";
+import { useLibrarySelection } from "../hooks/useLibrarySelection";
+import { AppErrorBoundary } from "../components/AppErrorBoundary";
 import { Shell } from "../components/Shell";
 import { TitleBar } from "../components/TitleBar";
 import { AppContextMenu } from "../components/AppContextMenu";
@@ -73,6 +75,7 @@ import "../App.css";
 const defaultDesktopSettings: DesktopSettings = {
   searchPageSize: 10,
   replayGainTargetLoudness: -18,
+  replayGainPeakMode: "samplePeak",
   lyricFormat: "verbatimLrc",
   lyricsConversionMode: "none",
   showTranslation: true,
@@ -92,6 +95,34 @@ const defaultDesktopSettings: DesktopSettings = {
     "\\": "＼", "/": "／", ":": "：", "*": "＊", "?": "？", "\"": "＂", "<": "＜", ">": "＞", "|": "｜",
   },
 };
+
+const desktopSettingsArrayFields = ["lyricLineOrder", "removeTagLineKeywords", "hiddenFolderPaths", "editFieldOrder"] as const;
+const desktopSettingsRecordFields = ["renameCharacterMappings", "editFieldVisibility"] as const;
+
+/**
+ * Settings written by an older build can miss fields. Merge what was stored onto the
+ * defaults so every `desktopSettings.*` read downstream stays safe; saved values still
+ * take precedence over the defaults.
+ */
+function normalizeDesktopSettings(stored: unknown): DesktopSettings {
+  const merged: Record<string, unknown> = { ...defaultDesktopSettings };
+  if (stored && typeof stored === "object") {
+    for (const [key, value] of Object.entries(stored)) {
+      if (value !== undefined && value !== null) merged[key] = value;
+    }
+  }
+  for (const key of desktopSettingsArrayFields) {
+    if (!Array.isArray(merged[key])) merged[key] = [...(defaultDesktopSettings[key] as readonly unknown[])];
+  }
+  for (const key of desktopSettingsRecordFields) {
+    const value = merged[key];
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      merged[key] = { ...(defaultDesktopSettings[key] as Record<string, unknown>) };
+    }
+  }
+  if (typeof merged.artistPosterFolder !== "string") merged.artistPosterFolder = defaultDesktopSettings.artistPosterFolder;
+  return merged as unknown as DesktopSettings;
+}
 
 export default function App() {
   const { i18n } = useTranslation();
@@ -127,14 +158,19 @@ export default function App() {
         algorithm: darkTheme ? theme.darkAlgorithm : theme.defaultAlgorithm,
         token: {
           colorPrimary: "#1677ff",
-          borderRadius: 8,
+          borderRadius: 4,
+          controlHeight: 30,
+          fontSize: 13,
           fontFamily:
             "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
         },
       }}
     >
       <AntApp>
-        <LyricoDesktop />
+        {/* Outer boundary: a crash in LyricoDesktop itself must not blank the window. */}
+        <AppErrorBoundary>
+          <LyricoDesktop />
+        </AppErrorBoundary>
       </AntApp>
     </ConfigProvider>
   );
@@ -166,7 +202,7 @@ function LyricoDesktop() {
   const [tracks, setTracks] = useState<AudioTrack[]>([]);
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [selectedPath, setSelectedPath] = useState<string>();
-  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+  const { selectedPaths, setSelectedPaths, selectedCollectionKeys, onToggleCollection } = useLibrarySelection();
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedFolderPath, setSelectedFolderPath] = useState<string>();
   const [selectedAlbumId, setSelectedAlbumId] = useState<string>();
@@ -198,7 +234,7 @@ function LyricoDesktop() {
   const [lyricMatchPaths, setLyricMatchPaths] = useState<Set<string>>(() => new Set());
   const filteredTracks = useMemo(() => {
     if (!isSearchView) return tracks;
-    const visibleTracks = tracks.filter((track) => !isPathInHiddenFolder(track.path, desktopSettings.hiddenFolderPaths));
+    const visibleTracks = tracks.filter((track) => !isPathInHiddenFolder(track.path, desktopSettings.hiddenFolderPaths ?? []));
     const matched = filterTracks(visibleTracks, deferredQuery);
     if (lyricMatchPaths.size === 0) return matched;
     const matchedPaths = new Set(matched.map((track) => track.path));
@@ -262,7 +298,7 @@ function LyricoDesktop() {
   }, [deferredQuery, isSearchView, desktopSettings.lyricIndexEnabled]);
 
   useEffect(() => {
-    const folder = desktopSettings.artistPosterFolder.trim();
+    const folder = (desktopSettings.artistPosterFolder ?? "").trim();
     if (!folder || artists.length === 0) {
       setArtistPosters({});
       return;
@@ -301,7 +337,7 @@ function LyricoDesktop() {
         setSelectedPaths([]);
         setArtistSplitConfig(storedArtistSplitConfig);
         setPlugins(storedPlugins);
-        setDesktopSettings(storedSettings);
+        setDesktopSettings(normalizeDesktopSettings(storedSettings));
       })
       .catch(() => {
         setFolders([]);
@@ -487,10 +523,14 @@ function LyricoDesktop() {
         readAudioFile(requestedPath),
         loadCustomTags(requestedPath),
       ]);
-      replaceTrack(refreshed);
+      const nextTrack = replaceTrack(refreshed);
+      if (!nextTrack) {
+        message.error(t("common.operationFailed"));
+        return;
+      }
       if (editingPathRef.current !== requestedPath) return;
-      setDetailTrack(refreshed);
-      setDetailCustomTags(customTags);
+      setDetailTrack(nextTrack);
+      setDetailCustomTags(Array.isArray(customTags) ? customTags : []);
       message.success(t("messages.reloaded"));
     } catch (error) {
       message.error(String(error));
@@ -510,10 +550,14 @@ function LyricoDesktop() {
       await form.validateFields();
       const values = completeTagForm(form.getFieldsValue(true), selectedTrack);
       const saved = await saveAudioTags(requestedPath, values);
-      replaceTrack(saved);
-      setSelectedPath(saved.path);
+      const nextTrack = replaceTrack(saved);
+      if (!nextTrack) {
+        message.error(t("common.operationFailed"));
+        return;
+      }
+      setSelectedPath(nextTrack.path);
       if (editingPathRef.current === requestedPath) {
-        setDetailTrack(saved);
+        setDetailTrack(nextTrack);
         setDetailCustomTags(values.customTags);
       }
       message.success(t("messages.saved"));
@@ -577,7 +621,8 @@ function LyricoDesktop() {
     const jobId = crypto.randomUUID();
     publishReplayGainProgress({ jobId, path: requestedPath, percent: 0, status: "running" });
     try {
-      const result = await analyzeReplayGain(requestedPath, jobId);
+      const result = await analyzeReplayGain(requestedPath, jobId, desktopSettings.replayGainTargetLoudness, desktopSettings.replayGainPeakMode ?? "samplePeak");
+      publishReplayGainProgress({ jobId, path: requestedPath, percent: 100, status: "completed" });
       if (editingPathRef.current !== requestedPath) return;
       form.setFieldsValue({
         replayGainTrackGain: result.trackGain,
@@ -586,6 +631,7 @@ function LyricoDesktop() {
       });
       message.success(t("messages.replayGainCalculated"));
     } catch (error) {
+      publishReplayGainProgress({ jobId, path: requestedPath, percent: 0, status: String(error).toLowerCase().includes("cancelled") ? "cancelled" : "failed", message: String(error) });
       if (editingPathRef.current !== requestedPath) return;
       if (!String(error).toLocaleLowerCase().includes("cancelled")) message.error(String(error));
     }
@@ -712,9 +758,12 @@ function LyricoDesktop() {
     await removeLibraryFolder(path).catch((error) => message.error(String(error)));
   }
 
-  function replaceTrack(nextTrack: AudioTrack) {
+  function replaceTrack(value: unknown) {
+    const nextTrack = asAudioTrack(value);
+    if (!nextTrack) return undefined;
     setTracks((current) => current.map((track) => (samePath(track.path, nextTrack.path) ? nextTrack : track)));
     updateCachedCover(nextTrack.path, nextTrack.coverDataUrl);
+    return nextTrack;
   }
 
   async function installPlugin() {
@@ -770,14 +819,9 @@ function LyricoDesktop() {
     }
   }
 
-  async function movePluginOrder(pluginId: string, direction: "up" | "down") {
-    const index = plugins.findIndex((plugin) => plugin.id === pluginId);
-    const nextIndex = direction === "up" ? index - 1 : index + 1;
-    if (index < 0 || nextIndex < 0 || nextIndex >= plugins.length) return;
-    const ordered = plugins.slice();
-    [ordered[index], ordered[nextIndex]] = [ordered[nextIndex], ordered[index]];
+  async function movePluginOrder(pluginIds: string[]) {
     try {
-      setPlugins(await setSourcePluginOrder(ordered.map((plugin) => plugin.id)));
+      setPlugins(await setSourcePluginOrder(pluginIds));
     } catch (error) {
       message.error(String(error));
       throw error;
@@ -818,10 +862,11 @@ function LyricoDesktop() {
   }
 
   function toggleFolderHidden(path: string) {
-    const hidden = desktopSettings.hiddenFolderPaths.some((folder) => samePath(folder, path));
+    const hiddenFolders = desktopSettings.hiddenFolderPaths ?? [];
+    const hidden = hiddenFolders.some((folder) => samePath(folder, path));
     const nextPaths = hidden
-      ? desktopSettings.hiddenFolderPaths.filter((folder) => !samePath(folder, path))
-      : [...desktopSettings.hiddenFolderPaths, path];
+      ? hiddenFolders.filter((folder) => !samePath(folder, path))
+      : [...hiddenFolders, path];
     changeDesktopSettings({ ...desktopSettings, hiddenFolderPaths: nextPaths });
     if (!hidden) {
       const hiddenTrackPaths = new Set(tracks.filter((track) => isTrackUnderFolder(track.path, path)).map((track) => track.path));
@@ -834,7 +879,7 @@ function LyricoDesktop() {
     Promise.all([loadArtistSplitConfig(), loadDesktopSettings()])
       .then(([split, settings]) => {
         setArtistSplitConfig(split);
-        setDesktopSettings(settings);
+        setDesktopSettings(normalizeDesktopSettings(settings));
       })
       .catch(() => undefined);
   }
@@ -852,6 +897,8 @@ function LyricoDesktop() {
       case "albums":
         return (
           <AlbumsPage
+            selectedCollectionKeys={selectedCollectionKeys}
+            onToggleCollection={onToggleCollection}
             albums={albums}
             query={query}
             selectedAlbumId={selectedAlbumId}
@@ -859,7 +906,6 @@ function LyricoDesktop() {
             loading={loading}
             onChangeQuery={onChangeQuery}
             onSelectAlbum={onSelectAlbum}
-            onSelectTrack={selectTrack}
             onOpenTrack={onAlbumOpenTrack}
             onOpenDetails={onAlbumOpenDetails}
             onCloseDetails={onAlbumCloseDetails}
@@ -873,6 +919,8 @@ function LyricoDesktop() {
       case "artists":
         return (
           <ArtistsPage
+            selectedCollectionKeys={selectedCollectionKeys}
+            onToggleCollection={onToggleCollection}
             artists={artists}
             query={query}
             selectedArtistId={selectedArtistId}
@@ -880,7 +928,6 @@ function LyricoDesktop() {
             loading={loading}
             onChangeQuery={onChangeQuery}
             onSelectArtist={onSelectArtist}
-            onSelectTrack={selectTrack}
             onOpenTrack={onArtistOpenTrack}
             onOpenDetails={onArtistOpenDetails}
             onCloseDetails={onArtistCloseDetails}
@@ -897,7 +944,6 @@ function LyricoDesktop() {
           <FoldersPage
             folders={folders}
             tracks={tracks}
-            selectedFolderPath={selectedFolderPath}
             loading={loading}
             onAddFolders={addFolders}
             onRescanFolder={scanAndMergeFolder}
@@ -905,12 +951,9 @@ function LyricoDesktop() {
             hiddenFolderPaths={desktopSettings.hiddenFolderPaths}
             onToggleFolderHidden={toggleFolderHidden}
             onSelectFolder={setSelectedFolderPath}
-            onSelectTrack={selectTrack}
             onOpenTrack={openTrackDetails}
             selectedPaths={selectedPaths}
-            selectionMode={selectionMode}
             onChangeSelectedPaths={onChangeSelectedPaths}
-            onChangeSelectionMode={changeSelectionMode}
             onOpenBatch={openBatchForSelection}
           />
         );
@@ -928,6 +971,7 @@ function LyricoDesktop() {
       case "tasks":
         return (
           <TasksPage
+            onChooseSongs={() => setActiveView("songs")}
             tracks={tracks}
             plugins={plugins}
             selectedPaths={selectedPaths}
@@ -952,18 +996,14 @@ function LyricoDesktop() {
       default:
         return (
           <SongsPage
+            onAddFolders={addFolders}
             tracks={filteredTracks}
             query={query}
-            selectedTrack={selectedTrack}
             selectedPaths={selectedPaths}
             loading={loading}
             onChangeQuery={onChangeQuery}
-            onSelectTrack={selectTrack}
             onChangeSelectedPaths={onChangeSelectedPaths}
-            selectionMode={selectionMode}
-            onChangeSelectionMode={changeSelectionMode}
             onOpenBatch={openBatchForSelection}
-            onReloadTrack={refreshSelected}
             onOpenDetails={openTrackDetails}
           />
         );
@@ -980,6 +1020,7 @@ function LyricoDesktop() {
     <>
     <TitleBar />
     {!detailsOpen ? <Form form={form} component={false} /> : null}
+      <AppErrorBoundary>
       <Shell
       activeView={activeView}
       folders={folders}
@@ -1020,6 +1061,7 @@ function LyricoDesktop() {
       /> : null}
       </Suspense>
     </Shell>
+      </AppErrorBoundary>
     <AppContextMenu onNavigate={changeView} />
     </>
   );
@@ -1087,4 +1129,12 @@ function normalizeFolderPath(path: string) {
 
 function normalizePath(path: string) {
   return path.replace(/\\/g, "/").toLocaleLowerCase();
+}
+
+/** IPC tag results are typed but may be null/undefined when the backend returns nothing. */
+function asAudioTrack(value: unknown): AudioTrack | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as Partial<AudioTrack>;
+  if (typeof candidate.path !== "string" || candidate.path.length === 0) return undefined;
+  return candidate as AudioTrack;
 }

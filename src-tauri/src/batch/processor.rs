@@ -1,4 +1,4 @@
-use crate::audio::{read_track, write_replay_gain_tags, ArtworkMode};
+use crate::audio::write_replay_gain_tags;
 use crate::database::Database;
 use crate::models::{AudioTrack, BatchTask, BatchTaskItem, ReplayGainProgress};
 use crate::replay_gain::analyze_track;
@@ -62,19 +62,6 @@ impl BatchProcessor for ReplayGainProcessor {
             return Err(ProcessError::Cancelled("Batch item cancelled".to_string()));
         }
         let path = Path::new(&context.item.song_path);
-        let existing = read_track(path, context.artist_separator, ArtworkMode::None)
-            .map_err(|error| ProcessError::Failed(error.to_string()))?;
-        if !existing.replay_gain_track_gain.is_empty()
-            || !existing.replay_gain_track_peak.is_empty()
-            || !existing.replay_gain_album_gain.is_empty()
-            || !existing.replay_gain_album_peak.is_empty()
-            || !existing.replay_gain_reference_loudness.is_empty()
-        {
-            return Err(ProcessError::Skipped(
-                "ReplayGain already exists".to_string(),
-            ));
-        }
-
         // Legacy tasks keep the documented default; execution never reads mutable settings.
         let target_loudness = context
             .task
@@ -88,11 +75,17 @@ impl BatchProcessor for ReplayGainProcessor {
             })
             .filter(|value| value.is_finite() && (-30.0..=0.0).contains(value))
             .unwrap_or(crate::replay_gain::DEFAULT_TARGET_LOUDNESS_LUFS);
+        let peak_mode = context.task.config_json.as_deref()
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+            .and_then(|config| config.get("peakMode").cloned())
+            .and_then(|mode| serde_json::from_value(mode).ok())
+            .unwrap_or(crate::replay_gain::PeakMode::SamplePeak);
         let job_id = format!("{}:{}", context.task.task_id, context.item.item_id);
         let analysis = analyze_track(
             job_id.clone(),
             path,
             target_loudness,
+            peak_mode,
             context.cancelled,
             |progress| {
                 on_progress(f64::from(progress));
@@ -125,6 +118,7 @@ impl BatchProcessor for ReplayGainProcessor {
             context.artist_separator,
             analysis.track_gain.clone(),
             analysis.track_peak.clone(),
+            analysis.reference_loudness.clone(),
         )
         .map_err(ProcessError::Failed)?;
         let _ = context.app.emit(
@@ -144,7 +138,8 @@ impl BatchProcessor for ReplayGainProcessor {
                     "trackPeak": analysis.track_peak,
                     "referenceLoudness": analysis.reference_loudness,
                     "loudnessLufs": analysis.loudness_lufs,
-                    "truePeak": analysis.peak,
+                    "peak": analysis.peak,
+                    "peakMode": peak_mode,
                 })
                 .to_string(),
             ),

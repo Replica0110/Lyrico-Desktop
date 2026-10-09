@@ -1,4 +1,5 @@
 #include <fileref.h>
+#include <tfilestream.h>
 #include <audioproperties.h>
 #include <tpropertymap.h>
 #include <tvariant.h>
@@ -18,6 +19,8 @@
 namespace {
 // Each handle owns one open file and one property map. No global mutable file state.
 struct Session {
+  // FileRef does not own an IOStream. Destroy it before its stream.
+  std::unique_ptr<TagLib::FileStream> stream;
   std::unique_ptr<TagLib::FileRef> file;
   TagLib::PropertyMap properties;
   TagLib::StringList changed;
@@ -71,7 +74,7 @@ extern "C" {
 const char *lyrico_taglib_error() noexcept { return last_error.c_str(); }
 void lyrico_taglib_free(uint8_t *buffer) noexcept { std::free(buffer); }
 void lyrico_taglib_close(void *handle) noexcept { delete static_cast<Session *>(handle); }
-void *lyrico_taglib_open(const char *path, int audio_properties) noexcept {
+void *lyrico_taglib_open(const char *path, int audio_properties, int read_only) noexcept {
   std::unique_ptr<Session> result;
   const auto ok = protect([&] {
     if(!path || !*path) throw std::runtime_error("Audio path is empty");
@@ -81,10 +84,13 @@ void *lyrico_taglib_open(const char *path, int audio_properties) noexcept {
     if(size <= 0) throw std::runtime_error("Invalid UTF-8 audio path");
     std::wstring wide(size, L'\0');
     MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide.data(), size);
-    result->file = std::make_unique<TagLib::FileRef>(wide.c_str(), audio_properties != 0);
+    result->stream = std::make_unique<TagLib::FileStream>(wide.c_str(), read_only != 0);
 #else
-    result->file = std::make_unique<TagLib::FileRef>(path, audio_properties != 0);
+    result->stream = std::make_unique<TagLib::FileStream>(path, read_only != 0);
 #endif
+    if(!result->stream->isOpen())
+      throw std::runtime_error(std::string("Cannot open audio file: ") + path);
+    result->file = std::make_unique<TagLib::FileRef>(result->stream.get(), audio_properties != 0);
     if(result->file->isNull() || !result->file->file()->isValid())
       throw std::runtime_error("TagLib does not support this file or its audio data is invalid");
     result->properties = result->file->properties();

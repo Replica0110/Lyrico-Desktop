@@ -36,7 +36,7 @@ export function selectLibraryRow(
   }
 
   return {
-    selectedPaths: [],
+    selectedPaths: [path],
     anchorIndex: index,
   };
 }

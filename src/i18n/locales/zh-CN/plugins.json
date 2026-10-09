@@ -1,42 +1,22 @@
 {
   "sources": {
     "title": "插件",
-    "description": "安装并配置 API v5 插件，用于在线搜索标签、歌词和封面。",
     "install": "安装插件",
-    "installTitle": "安装插件",
-    "installConfirm": "安装",
-    "installed": "已安装插件",
+    "installed": "已安装",
+    "installedCount": "{{count}} 个已安装",
     "none": "还没有插件",
     "configuration": "配置",
     "noConfiguration": "没有可设置的选项",
     "noCapabilities": "未声明能力",
     "manifest": "清单",
     "select": "请选择插件",
+    "toggleEnabled": "启用或停用 {{name}}",
     "installSuccess": "已安装 {{count}} 个插件",
     "configSaved": "插件配置已保存",
     "uninstall": "卸载插件",
     "uninstallConfirm": "确认卸载 {{name}}？",
     "uninstallSuccess": "插件已卸载",
-    "noneForType": "这一类还没有插件",
-    "unknownAuthor": "未知作者",
-    "priorityHint": "靠前的插件会优先搜索。",
-    "priority": "第 {{value}} 位",
-    "moveUp": "提高优先级",
-    "moveDown": "降低优先级",
     "installedAt": "安装于 {{value}}",
-    "updatedAt": "更新于 {{value}}",
-    "types": {
-      "aggregated": "综合",
-      "metadata": "标签",
-      "lyrics": "歌词",
-      "covers": "封面"
-    },
-    "conflicts": {
-      "new": "新插件",
-      "update": "更新",
-      "overwrite": "重新安装",
-      "downgrade": "降级"
-    },
-    "invalidPlugin": "无法安装"
+    "updatedAt": "更新于 {{value}}"
   }
 }
