@@ -15,6 +15,7 @@ const plugins = read("../pages/PluginsPage.tsx");
 const tasks = read("../pages/TasksPage.tsx");
 const libraryTable = read("../components/LibraryTable.tsx");
 const sortableList = read("../components/SortableList.tsx");
+const songDetails = read("../components/SongDetails.tsx");
 
 const pageFiles = {
   SongsPage: songs,
@@ -96,6 +97,15 @@ describe("utility layout contract", () => {
     for (const name of ["SettingsPage", "PluginsPage"]) {
       expect(pageFiles[name], name).toContain("<SortableList");
     }
+  });
+
+  it("keeps composite field groups and progress on shared components", () => {
+    expect(songDetails).toContain("<ProgressBar");
+    expect(songDetails).not.toMatch(/Progress[,\s].*from "antd"/);
+    expect(songDetails).toContain('className="field-group"');
+    expect(css).toContain(".field-group {");
+    expect(css).toContain(".progress-bar {");
+    expect(css).toContain(".progress-bar.is-indeterminate");
   });
 
   it("drops descriptive subtitles and keeps actionable empty states", () => {

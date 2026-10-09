@@ -1166,12 +1166,73 @@ textarea {
   padding-block: 18px 6px;
 }
 
-.replay-gain-actions {
-  margin-bottom: 18px;
+/* Field group: one bordered container that ties a composite field's label, its actions
+   and its controls together, so a toolbar never floats next to an unrelated field. */
+.field-group {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--surface-radius);
+  background: var(--bg-secondary);
 }
 
-.lyrics-actions {
-  margin-bottom: 16px;
+.field-group-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+/* The group owns the spacing: the outer control loses its margin, nested fields keep the rhythm. */
+.tag-field .field-group .ant-form-item {
+  margin-bottom: 0;
+}
+
+.field-group .tag-field .ant-form-item {
+  margin-bottom: 12px;
+}
+
+.field-group-grid {
+  gap: 0 16px;
+}
+
+/* Settings › edit fields: the ReplayGain block renders as one group of member switches. */
+.edit-field-group {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  margin-block: 6px;
+  padding: 8px 10px;
+  border-radius: var(--surface-radius);
+  background: var(--overlay-bg);
+}
+
+.edit-field-group-members {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 20px;
+}
+
+.edit-field-member {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* A composite block is taller than one line: pin its handle to the first line. */
+.reorder-row:has(.edit-field-group) {
+  align-items: flex-start;
+}
+
+.reorder-row:has(.edit-field-group) > .reorder-handle {
+  margin-top: 6px;
 }
 
 .batch-edit-fields {
@@ -1187,9 +1248,27 @@ textarea {
   gap: 12px;
 }
 
+/* In-panel progress: a real bar plus the tabular percentage, never a bare number. */
+.field-group-progress {
+  display: flex;
+  flex: 1 1 240px;
+  min-width: 200px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
 .replay-gain-progress {
-  max-width: 320px;
-  margin: 0;
+  flex: 1 1 auto;
+  min-width: 140px;
+  max-width: 300px;
+}
+
+.replay-gain-percent {
+  min-width: 40px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .drawer-loading {
@@ -1486,16 +1565,17 @@ html[data-theme="dark"] .app-content {
   gap: 4px;
 }
 
-.side-progress {
+/* Progress bar: one implementation for global strips and in-panel progress. */
+.progress-bar {
   position: relative;
+  display: block;
   height: 6px;
-  margin-top: 8px;
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(22, 119, 255, 0.12);
+  background: color-mix(in srgb, var(--ant-color-primary) 16%, transparent);
 }
 
-.side-progress-fill {
+.progress-bar-fill {
   display: block;
   height: 100%;
   border-radius: inherit;
@@ -1503,16 +1583,35 @@ html[data-theme="dark"] .app-content {
   transition: width 180ms ease;
 }
 
-.side-progress.is-success .side-progress-fill {
+.progress-bar.is-success .progress-bar-fill {
   background: var(--ant-color-success);
 }
 
-.side-progress.is-exception .side-progress-fill {
+.progress-bar.is-exception .progress-bar-fill {
   background: var(--ant-color-error);
 }
 
-html[data-theme="dark"] .side-progress {
-  background: rgba(255, 255, 255, 0.08);
+/* Unknown progress: show motion, never an empty track. */
+.progress-bar.is-indeterminate .progress-bar-fill {
+  width: 34%;
+  animation: progress-sweep 1.1s ease-in-out infinite;
+}
+
+@keyframes progress-sweep {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(300%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-bar.is-indeterminate .progress-bar-fill {
+    width: 100%;
+    animation: none;
+    opacity: 0.55;
+  }
+}
+
+.side-progress {
+  margin-top: 8px;
 }
 
 .about-collapse {

@@ -2,7 +2,7 @@ import { ApiOutlined, AudioOutlined, EditOutlined, FileTextOutlined, FolderOpenO
 import { App as AntApp, Avatar, Button, Collapse, Flex, Input, InputNumber, Select, Space, Spin, Switch, Table, Tabs, Tag, Typography, type TableColumnsType } from "antd";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getVersion } from "@tauri-apps/api/app";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { ArtistSplitConfig, DesktopSettings, LyricLineTrack } from "../app/types";
 import type { LanguagePreference } from "../i18n";
@@ -13,7 +13,7 @@ import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { exportConfig, importConfig, loadAppLogs, pickPaths, pickSavePath, writeTextFile, type AppLogEntry, type ThemeMode } from "../backend/audioApi";
 import { normalizeCleanupKeywords, normalizeLyricLineOrder } from "../domain/lyricsSettings";
-import { normalizeEditFieldOrder, EDIT_FIELD_LABEL_KEYS } from "../domain/editFieldSettings";
+import { normalizeEditFieldOrder, EDIT_FIELD_LABEL_KEYS, REPLAY_GAIN_BLOCK_KEY, REPLAY_GAIN_FIELDS, toEditFieldBlocks } from "../domain/editFieldSettings";
 import { parseTimeValue } from "../utils/format";
 
 const { Text } = Typography;
@@ -178,18 +178,8 @@ export function SettingsPage({
               icon: <EditOutlined />,
               children: (
                   <SettingsSection title={t("settings.editFields")}>
-                    <SortableList
-                      items={normalizeEditFieldOrder(settings.editFieldOrder)}
-                      label={t("settings.editFields")}
-                      labelFor={key => t(EDIT_FIELD_LABEL_KEYS.find(([field]) => field === key)?.[1] ?? key)}
-                      onChange={editFieldOrder => onChangeSettings({ ...settings, editFieldOrder })}
-                      renderItem={key => <><Text>{t(EDIT_FIELD_LABEL_KEYS.find(([field]) => field === key)?.[1] ?? key)}</Text>
-                        <Switch size="small" aria-label={t("settings.showField", { name: t(EDIT_FIELD_LABEL_KEYS.find(([field]) => field === key)?.[1] ?? key) })}
-                          checked={settings.editFieldVisibility?.[key] !== false}
-                          onChange={checked => onChangeSettings({ ...settings, editFieldVisibility: { ...settings.editFieldVisibility, [key]: checked } })} />
-                      </>}
-                    />
-                </SettingsSection>
+                    <EditFieldOrderEditor settings={settings} onChange={onChangeSettings} />
+                  </SettingsSection>
               ),
             },
             {
@@ -260,6 +250,61 @@ export function SettingsPage({
 
 function SettingsSection({ title, children }: { title: string; children: ReactNode }) {
   return <section className="settings-section"><Typography.Title level={4}>{title}</Typography.Title>{children}</section>;
+}
+
+/**
+ * Field order editor. Ordering works on blocks, not raw fields: the ReplayGain values are one
+ * measurement and always move (and render) as one adjacent group. See docs/ui-layout.md §9.6.
+ */
+function EditFieldOrderEditor({ settings, onChange }: { settings: DesktopSettings; onChange: (settings: DesktopSettings) => void }) {
+  const { t } = useTranslation();
+  const blocks = useMemo(() => toEditFieldBlocks(normalizeEditFieldOrder(settings.editFieldOrder)), [settings.editFieldOrder]);
+  const labelOf = (key: string) => t(EDIT_FIELD_LABEL_KEYS.find(([field]) => field === key)?.[1] ?? key);
+  const shown = (key: string) => settings.editFieldVisibility?.[key] !== false;
+  const setShown = (key: string, checked: boolean) =>
+    onChange({ ...settings, editFieldVisibility: { ...settings.editFieldVisibility, [key]: checked } });
+
+  const visibilitySwitch = (key: string) => (
+    <Switch
+      size="small"
+      aria-label={t("settings.showField", { name: labelOf(key) })}
+      checked={shown(key)}
+      onChange={(checked) => setShown(key, checked)}
+    />
+  );
+
+  return (
+    <SortableList
+      items={blocks.map((block) => block.key)}
+      label={t("settings.editFields")}
+      labelFor={(key) => (key === REPLAY_GAIN_BLOCK_KEY ? t("settings.replayGain") : labelOf(key))}
+      onChange={(keys) => {
+        const byKey = new Map(blocks.map((block) => [block.key, block]));
+        onChange({ ...settings, editFieldOrder: keys.flatMap((key) => byKey.get(key)?.fields ?? []) });
+      }}
+      renderItem={(key) => {
+        if (key !== REPLAY_GAIN_BLOCK_KEY) {
+          return <>
+            <Text>{labelOf(key)}</Text>
+            {visibilitySwitch(key)}
+          </>;
+        }
+        return (
+          <div className="edit-field-group">
+            <Text strong>{t("settings.replayGain")}</Text>
+            <div className="edit-field-group-members">
+              {REPLAY_GAIN_FIELDS.map((field) => (
+                <div className="edit-field-member" key={field}>
+                  <Text type="secondary">{labelOf(field)}</Text>
+                  {visibilitySwitch(field)}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      }}
+    />
+  );
 }
 
 function SettingRow({ title, description, children }: { title: string; description?: string; children: ReactNode }) {

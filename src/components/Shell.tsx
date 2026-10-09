@@ -17,6 +17,7 @@ import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 
 import { useTranslation } from "react-i18next";
 import type { AudioTrack, LibraryFolder, ReplayGainProgress, ScanProgress, ViewKey } from "../app/types";
 import { EmptyState } from "./EmptyState";
+import { ProgressBar } from "./ProgressBar";
 import { SubPageBar } from "./SubPageBar";
 import { TrackArtwork } from "./TrackArtwork";
 import { filterTracks } from "../domain/library";
@@ -234,7 +235,7 @@ function GlobalReplayGainProgress({ progress, onCancel }: { progress: ReplayGain
         <Text type="secondary">{progress.percent}%</Text>
         <Button size="small" danger onClick={onCancel}>{t("common.cancel")}</Button>
       </Flex>
-      <SideProgress percent={progress.percent} status="active" />
+      <ProgressBar percent={progress.percent} className="side-progress" />
     </div>
   );
 }
@@ -255,19 +256,11 @@ function GlobalScanProgress({ progress }: { progress: ScanProgress }) {
         </Text>
         {progress.total > 0 && <Text type="secondary">{progress.current}/{progress.total}</Text>}
       </Flex>
-      <SideProgress
+      <ProgressBar
         percent={percent}
         status={progress.status === "failed" ? "exception" : progress.status === "completed" ? "success" : "active"}
+        className="side-progress"
       />
-    </div>
-  );
-}
-
-function SideProgress({ percent, status }: { percent: number; status: "active" | "success" | "exception" }) {
-  const value = Math.max(0, Math.min(100, percent));
-  return (
-    <div className={`side-progress is-${status}`} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(value)}>
-      <span className="side-progress-fill" style={{ width: `${value}%` }} />
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { DeleteOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, SearchOutlined, ShareAltOutlined } from "@ant-design/icons";
-import { Alert, Avatar, Button, Checkbox, Descriptions, Drawer, Empty, Flex, Form, Input, InputNumber, List, Modal, Progress, Rate, Segmented, Select, Space, Spin, Tabs, Typography } from "antd";
+import { Alert, Avatar, Button, Checkbox, Descriptions, Drawer, Empty, Flex, Form, Input, InputNumber, List, Modal, Rate, Segmented, Select, Space, Spin, Tabs, Typography } from "antd";
 import type { FormInstance } from "antd";
 import type { TFunction } from "i18next";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -10,12 +10,13 @@ import { buildLyricsCandidates, extractPlainLyricsText, LYRIC_FORMATS, lyricsCan
 import { formatDuration } from "../utils/format";
 import { useImageDimensions } from "../hooks/useImageDimensions";
 import { CoverCropModal } from "./CoverCropModal";
+import { ProgressBar } from "./ProgressBar";
 import { TrackArtwork } from "./TrackArtwork";
 import { RemoteArtwork } from "./RemoteArtwork";
 import { useRemoteImage } from "../hooks/useRemoteImage";
 import { useReplayGainProgress } from "../hooks/useReplayGainProgress";
 import { defaultOnlineSearchKeyword } from "../domain/search";
-import { normalizeEditFieldOrder, EDIT_FIELD_LABEL_KEYS } from "../domain/editFieldSettings";
+import { normalizeEditFieldOrder, EDIT_FIELD_LABEL_KEYS, toEditFieldBlocks } from "../domain/editFieldSettings";
 
 const { Text } = Typography;
 
@@ -887,23 +888,37 @@ function LocalTagEditor({ form, settings, replayGainProgress, onCalculateReplayG
       if (request === lyricsProcessRequest.current) setLyricsProcessingAction(undefined);
     }
   }
-  const lyricsEditor = <>
-        {lyricsError ? <Alert type="error" showIcon closable message={lyricsError} onClose={() => setLyricsError(undefined)} /> : null}
-        <Space wrap className="lyrics-actions">
-          <Button disabled={lyricsProcessing} onClick={onImportLyrics}>{t("lyrics.import")}</Button>
-          <Button disabled={!currentLyrics.trim() || lyricsProcessing} onClick={onExportLyrics}>{t("lyrics.export")}</Button>
-          {[-500, -100, 100, 500].map((offset) => (
-            <Button key={offset} loading={lyricsProcessingAction === offset} disabled={!currentLyrics.trim() || lyricsProcessing} onClick={() => void transformLyrics({ offsetMs: offset }, offset)}>
-              {offset > 0 ? `+${offset} ms` : `${offset} ms`}
-            </Button>
-          ))}
-          <Button loading={lyricsProcessingAction === "removeEmpty"} disabled={!currentLyrics.trim() || lyricsProcessing} onClick={() => void transformLyrics({ removeEmptyLines: true }, "removeEmpty")}>{t("lyrics.removeEmpty")}</Button>
-          <Button loading={lyricsProcessingAction === "plain"} disabled={!currentLyrics.trim() || lyricsProcessing} onClick={() => void openPlainLyrics()}>{t("lyrics.plainText")}</Button>
+  const lyricsEditor =
+    <section className="field-group">
+      <header className="field-group-header">
+        <Text strong>{t("details.lyrics")}</Text>
+        <Space size={8} wrap>
+          <Space.Compact>
+            <Button size="small" disabled={lyricsProcessing} onClick={onImportLyrics}>{t("lyrics.import")}</Button>
+            <Button size="small" disabled={!currentLyrics.trim() || lyricsProcessing} onClick={onExportLyrics}>{t("lyrics.export")}</Button>
+          </Space.Compact>
+          <Space size={4} align="center">
+            <Space.Compact>
+              {[-500, -100, 100, 500].map((offset) => (
+                <Button key={offset} size="small" loading={lyricsProcessingAction === offset} disabled={!currentLyrics.trim() || lyricsProcessing} onClick={() => void transformLyrics({ offsetMs: offset }, offset)}>
+                  {offset > 0 ? `+${offset}` : `${offset}`}
+                </Button>
+              ))}
+            </Space.Compact>
+            <Text type="secondary">ms</Text>
+          </Space>
+          <Space.Compact>
+            <Button size="small" loading={lyricsProcessingAction === "removeEmpty"} disabled={!currentLyrics.trim() || lyricsProcessing} onClick={() => void transformLyrics({ removeEmptyLines: true }, "removeEmpty")}>{t("lyrics.removeEmpty")}</Button>
+            <Button size="small" loading={lyricsProcessingAction === "plain"} disabled={!currentLyrics.trim() || lyricsProcessing} onClick={() => void openPlainLyrics()}>{t("lyrics.plainText")}</Button>
+          </Space.Compact>
         </Space>
-        {showField("lyrics") ? <Form.Item name="lyrics" label={t("details.lyrics")}><Input.TextArea autoSize={{ minRows: 8, maxRows: 18 }} /></Form.Item> : null}
-      </>;
-  const visibleFields = normalizeEditFieldOrder(settings.editFieldOrder).filter(showField);
-  const firstReplayGainField = visibleFields.find(key => key.startsWith("replayGain"));
+      </header>
+      {lyricsError ? <Alert type="error" showIcon closable message={lyricsError} onClose={() => setLyricsError(undefined)} /> : null}
+      <Form.Item name="lyrics">
+        <Input.TextArea aria-label={t("details.lyrics")} autoSize={{ minRows: 8, maxRows: 18 }} />
+      </Form.Item>
+    </section>;
+  const blocks = toEditFieldBlocks(normalizeEditFieldOrder(settings.editFieldOrder));
   const labels = Object.fromEntries(EDIT_FIELD_LABEL_KEYS);
   function renderField(key: string) {
     if (key === "lyrics") return lyricsEditor;
@@ -918,12 +933,33 @@ function LocalTagEditor({ form, settings, replayGainProgress, onCalculateReplayG
     <>
     <Form form={form} layout="vertical" requiredMark={false} className="tag-form">
       <div className="tag-field-grid">
-        {visibleFields.map(key => <div key={key} className={`tag-field${["lyrics", "customTags"].includes(key) ? " is-wide" : ""}`}>
-          {key === firstReplayGainField ? <Flex align="center" gap={12} wrap className="replay-gain-actions">
-            {replayGainProgress?.status === "running" ? <><Button danger onClick={onCancelReplayGain}>{t("common.cancel")}</Button><Progress percent={replayGainProgress.percent} size="small" className="replay-gain-progress" /></> : <Button onClick={onCalculateReplayGain}>{t("replayGain.calculate")}</Button>}
-          </Flex> : null}
-          {renderField(key)}
-        </div>)}
+        {blocks.map(block => {
+          if (!block.composite) {
+            const key = block.key;
+            if (!showField(key)) return null;
+            return <div key={key} className={`tag-field${["lyrics", "customTags"].includes(key) ? " is-wide" : ""}`}>{renderField(key)}</div>;
+          }
+          // ReplayGain is one measurement: render the members together, actions in the group header.
+          const members = block.fields.filter(showField);
+          if (!members.length) return null;
+          return <div key={block.key} className="tag-field is-wide">
+            <section className="field-group">
+              <header className="field-group-header">
+                <Text strong>{t("settings.replayGain")}</Text>
+                {replayGainProgress?.status === "running"
+                  ? <div className="field-group-progress">
+                    <Button size="small" danger onClick={onCancelReplayGain}>{t("common.cancel")}</Button>
+                    <ProgressBar percent={replayGainProgress.percent} indeterminate={replayGainProgress.percent <= 0} className="replay-gain-progress" />
+                    <Text type="secondary" className="replay-gain-percent">{replayGainProgress.percent}%</Text>
+                  </div>
+                  : <Button size="small" onClick={onCalculateReplayGain}>{t("replayGain.calculate")}</Button>}
+              </header>
+              <div className="tag-field-grid field-group-grid">
+                {members.map(key => <div className="tag-field" key={key}>{renderField(key)}</div>)}
+              </div>
+            </section>
+          </div>;
+        })}
       </div>
     </Form>
     <Modal title={t("lyrics.plainText")} open={plainLyricsOpen} footer={null} onCancel={() => setPlainLyricsOpen(false)}>
