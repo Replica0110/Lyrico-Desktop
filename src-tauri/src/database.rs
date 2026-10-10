@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const DATABASE_SCHEMA_VERSION: u32 = 9;
+const DATABASE_SCHEMA_VERSION: u32 = 10;
 static NEXT_BATCH_ID: AtomicU64 = AtomicU64::new(1);
 const BATCH_TASK_TYPES: &[&str] = &[
     "matchMetadata",
@@ -400,6 +400,7 @@ impl Database {
                         sample_rate, channels, has_lyrics, has_cover,
                         replay_gain_track_gain, replay_gain_track_peak,
                         replay_gain_album_gain, replay_gain_album_peak,
+                        replay_gain_reference_loudness,
                         modified_at, added_at, created_at
                  FROM songs
                  ORDER BY album COLLATE NOCASE, disc_number, track_number, title COLLATE NOCASE",
@@ -494,6 +495,7 @@ impl Database {
                         sample_rate, channels, has_lyrics, has_cover,
                         replay_gain_track_gain, replay_gain_track_peak,
                         replay_gain_album_gain, replay_gain_album_peak,
+                        replay_gain_reference_loudness,
                         modified_at, added_at, created_at
                  FROM songs WHERE path IN ({placeholders})"
             );
@@ -539,6 +541,7 @@ impl Database {
                         sample_rate, channels, has_lyrics, has_cover,
                         replay_gain_track_gain, replay_gain_track_peak,
                         replay_gain_album_gain, replay_gain_album_peak,
+                        replay_gain_reference_loudness,
                         modified_at, added_at, created_at, file_size, modified_at
                  FROM songs WHERE folder_path = ?1",
             )
@@ -547,10 +550,10 @@ impl Database {
             .query_map(params![folder_path], |row| {
                 let track = map_audio_track(row)?;
                 let file_size = row
-                    .get::<_, i64>(24)
+                    .get::<_, i64>(25)
                     .map(|value| u64::try_from(value).unwrap_or_default())?;
                 let modified_at = row
-                    .get::<_, i64>(25)
+                    .get::<_, i64>(26)
                     .map(|value| u64::try_from(value).unwrap_or_default())?;
                 Ok(IndexedTrack {
                     track,
@@ -1418,6 +1421,12 @@ fn migrate_schema(connection: &Connection) -> Result<(), String> {
     add_column_if_missing(connection, "songs", "cover_artwork_data_url", "TEXT")?;
     add_column_if_missing(
         connection,
+        "songs",
+        "replay_gain_reference_loudness",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
+    add_column_if_missing(
+        connection,
         "library_folders",
         "scan_signature",
         "TEXT NOT NULL DEFAULT ''",
@@ -1523,11 +1532,12 @@ fn upsert_track(
                 id, path, folder_path, file_name, title, artist, album, album_artist, genre,
                 track_number, disc_number, year, duration_seconds, format, bitrate, sample_rate,
                 channels, has_lyrics, has_cover, replay_gain_track_gain, replay_gain_track_peak,
-                replay_gain_album_gain, replay_gain_album_peak, file_size, modified_at, added_at,
+                replay_gain_album_gain, replay_gain_album_peak, replay_gain_reference_loudness,
+                file_size, modified_at, added_at,
                 created_at, updated_at, lyrics
              ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29
+                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30
              ) ON CONFLICT(path) DO UPDATE SET
                 folder_path = excluded.folder_path, file_name = excluded.file_name,
                 title = excluded.title, artist = excluded.artist, album = excluded.album,
@@ -1541,6 +1551,7 @@ fn upsert_track(
                 replay_gain_track_peak = excluded.replay_gain_track_peak,
                 replay_gain_album_gain = excluded.replay_gain_album_gain,
                 replay_gain_album_peak = excluded.replay_gain_album_peak,
+                replay_gain_reference_loudness = excluded.replay_gain_reference_loudness,
                 cover_thumbnail_data_url = NULL, cover_artwork_data_url = NULL,
                 file_size = excluded.file_size, modified_at = excluded.modified_at,
                 added_at = CASE WHEN added_at = 0 THEN excluded.added_at ELSE added_at END,
@@ -1570,6 +1581,7 @@ fn upsert_track(
                 track.replay_gain_track_peak,
                 track.replay_gain_album_gain,
                 track.replay_gain_album_peak,
+                track.replay_gain_reference_loudness,
                 as_i64(file_size),
                 as_i64(modified_at),
                 as_i64(added_at),
@@ -1641,10 +1653,10 @@ fn map_audio_track(row: &Row<'_>) -> rusqlite::Result<AudioTrack> {
         replay_gain_track_peak: row.get(18)?,
         replay_gain_album_gain: row.get(19)?,
         replay_gain_album_peak: row.get(20)?,
-        replay_gain_reference_loudness: String::new(),
-        modified_at: stored_time(row.get(21)?),
-        added_at: stored_time(row.get(22)?),
-        created_at: stored_time(row.get(23)?),
+        replay_gain_reference_loudness: row.get(21)?,
+        modified_at: stored_time(row.get(22)?),
+        added_at: stored_time(row.get(23)?),
+        created_at: stored_time(row.get(24)?),
     })
 }
 
@@ -1728,6 +1740,7 @@ CREATE TABLE IF NOT EXISTS songs (
     has_lyrics INTEGER NOT NULL DEFAULT 0, has_cover INTEGER NOT NULL DEFAULT 0,
     replay_gain_track_gain TEXT NOT NULL DEFAULT '', replay_gain_track_peak TEXT NOT NULL DEFAULT '',
     replay_gain_album_gain TEXT NOT NULL DEFAULT '', replay_gain_album_peak TEXT NOT NULL DEFAULT '',
+    replay_gain_reference_loudness TEXT NOT NULL DEFAULT '',
     file_size INTEGER NOT NULL DEFAULT 0, modified_at INTEGER NOT NULL DEFAULT 0,
     added_at INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL DEFAULT 0,

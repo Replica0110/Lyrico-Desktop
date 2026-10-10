@@ -697,7 +697,7 @@ pub(crate) async fn scan_folder(
                 return Err("This folder is already being scanned".to_string());
             }
         }
-        let scan_signature = format!("audio-summary-taglib-v2|artist-separator={artist_separator}");
+        let scan_signature = format!("audio-summary-taglib-v3|artist-separator={artist_separator}");
         let existing_index = match state
             .database
             .load_folder_index(&folder_path, &scan_signature)
