@@ -1,0 +1,96 @@
+cmake_minimum_required(VERSION 3.20)
+project(lyrico_ffmpeg LANGUAGES C)
+include(ExternalProject)
+find_package(Git REQUIRED)
+execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/upstream"
+  OUTPUT_VARIABLE revision OUTPUT_STRIP_TRAILING_WHITESPACE RESULT_VARIABLE git_status)
+if(NOT git_status EQUAL 0 OR NOT revision STREQUAL "1041abdc962f4cc4f394aa8de9dc5236c0c3b9e7")
+  message(FATAL_ERROR "Initialize the pinned FFmpeg submodule: git submodule update --init --recursive")
+endif()
+if(CMAKE_CROSSCOMPILING)
+  message(FATAL_ERROR "Build FFmpeg on the target operating system and architecture")
+endif()
+if(WIN32)
+  set(MSYS2_ROOT "$ENV{LYRICO_MSYS2_ROOT}" CACHE PATH "MSYS2 installation")
+  if(NOT MSYS2_ROOT)
+    set(MSYS2_ROOT "C:/msys64")
+  endif()
+  if(NOT EXISTS "${MSYS2_ROOT}/usr/bin/bash.exe" OR NOT EXISTS "${MSYS2_ROOT}/usr/bin/cmp.exe")
+    message(FATAL_ERROR "FFmpeg needs MSYS2 with make, diffutils, pkgconf and NASM. Set LYRICO_MSYS2_ROOT. See https://ffmpeg.org/platform.html")
+  endif()
+  find_program(BASH bash.exe PATHS "${MSYS2_ROOT}/usr/bin" NO_DEFAULT_PATH REQUIRED)
+  find_program(GNU_MAKE make.exe PATHS "${MSYS2_ROOT}/usr/bin" NO_DEFAULT_PATH REQUIRED)
+  set(platform windows)
+elseif(APPLE)
+  find_program(BASH bash REQUIRED)
+  find_program(GNU_MAKE NAMES gmake make REQUIRED)
+  set(platform macos)
+else()
+  find_program(BASH bash REQUIRED)
+  find_program(GNU_MAKE NAMES gmake make REQUIRED)
+  set(platform linux)
+endif()
+if(NOT FFMPEG_ARCH)
+  set(FFMPEG_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+if(FFMPEG_ARCH STREQUAL "aarch64" OR FFMPEG_ARCH STREQUAL "arm64")
+  set(FFMPEG_ARCH aarch64)
+elseif(FFMPEG_ARCH MATCHES "^(AMD64|x86_64|x64)$")
+  set(FFMPEG_ARCH x86_64)
+endif()
+include(ProcessorCount)
+ProcessorCount(jobs)
+if(NOT jobs)
+  set(jobs 4)
+endif()
+set(prefix "${CMAKE_CURRENT_BINARY_DIR}/sdk")
+set(ffbuild "${CMAKE_CURRENT_BINARY_DIR}/ffmpeg")
+if(WIN32)
+  set(command "${CMAKE_COMMAND}" -E env MSYSTEM=MSYS VSLANG=1033
+    "${BASH}" --noprofile --norc "${CMAKE_CURRENT_SOURCE_DIR}/build.sh")
+else()
+  set(command "${BASH}" --noprofile --norc "${CMAKE_CURRENT_SOURCE_DIR}/build.sh")
+endif()
+set(arguments "${CMAKE_CURRENT_SOURCE_DIR}/upstream" "${ffbuild}" "${prefix}"
+  "${platform}" "${FFMPEG_ARCH}" "${GNU_MAKE}" "${CMAKE_C_COMPILER}" "${jobs}")
+if(WIN32)
+  set(link_libraries "${prefix}/bin/avformat.lib" "${prefix}/bin/avcodec.lib" "${prefix}/bin/avutil.lib")
+else()
+  set(link_libraries "${prefix}/lib/libavformat${CMAKE_SHARED_LIBRARY_SUFFIX}"
+    "${prefix}/lib/libavcodec${CMAKE_SHARED_LIBRARY_SUFFIX}"
+    "${prefix}/lib/libavutil${CMAKE_SHARED_LIBRARY_SUFFIX}")
+endif()
+ExternalProject_Add(ffmpeg
+  SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/upstream"
+  BINARY_DIR "${ffbuild}"
+  DOWNLOAD_COMMAND "" UPDATE_COMMAND ""
+  CONFIGURE_COMMAND ${command} configure ${arguments}
+  BUILD_COMMAND ${command} build ${arguments}
+  INSTALL_COMMAND ${command} install ${arguments}
+  BUILD_BYPRODUCTS ${link_libraries}
+  LIST_SEPARATOR "|"
+  BUILD_ALWAYS TRUE)
+ExternalProject_Add_StepDependencies(ffmpeg configure "${CMAKE_CURRENT_SOURCE_DIR}/build.sh"
+  "${CMAKE_CURRENT_SOURCE_DIR}/cl-deps.sh")
+add_library(lyrico_ffmpeg_bridge SHARED bridge.c)
+add_dependencies(lyrico_ffmpeg_bridge ffmpeg)
+target_include_directories(lyrico_ffmpeg_bridge PRIVATE "${prefix}/include")
+target_link_libraries(lyrico_ffmpeg_bridge PRIVATE ${link_libraries})
+set_target_properties(lyrico_ffmpeg_bridge PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES
+  BUILD_RPATH "${prefix}/lib" INSTALL_RPATH "$ORIGIN")
+if(APPLE)
+  set_target_properties(lyrico_ffmpeg_bridge PROPERTIES INSTALL_RPATH "@loader_path")
+elseif(UNIX)
+  # DT_RPATH also resolves indirect FFmpeg dependencies from this directory.
+  target_link_options(lyrico_ffmpeg_bridge PRIVATE "-Wl,--disable-new-dtags")
+endif()
+install(TARGETS lyrico_ffmpeg_bridge RUNTIME DESTINATION runtime LIBRARY DESTINATION runtime)
+if(WIN32)
+  install(DIRECTORY "${prefix}/bin/" DESTINATION runtime FILES_MATCHING PATTERN "*.dll")
+elseif(APPLE)
+  install(DIRECTORY "${prefix}/lib/" DESTINATION runtime FILES_MATCHING PATTERN "*.dylib")
+else()
+  install(DIRECTORY "${prefix}/lib/" DESTINATION runtime FILES_MATCHING PATTERN "*.so*")
+endif()
+install(FILES upstream/COPYING.LGPLv2.1 upstream/COPYING.GPLv2 NOTICE.md DESTINATION runtime)

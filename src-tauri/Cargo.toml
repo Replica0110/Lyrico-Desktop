@@ -16,6 +16,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 cmake = "0.1.58"
+cc = "1"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
@@ -32,7 +33,7 @@ image = { version = "0.25.8", default-features = false, features = ["jpeg", "png
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 rayon = "1.11.0"
 ebur128 = "0.1.10"
-symphonia = { version = "0.6.0", features = ["all"] }
+libloading = "0.8"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 rquickjs = "0.12.2"
 reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "rustls", "gzip", "brotli", "deflate"] }

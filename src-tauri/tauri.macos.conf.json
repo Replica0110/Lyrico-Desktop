@@ -1,0 +1,19 @@
+{
+  "bundle": {
+    "targets": ["app", "dmg"],
+    "resources": [
+      "native/ffmpeg/runtime/COPYING.LGPLv2.1",
+      "native/ffmpeg/runtime/COPYING.GPLv2",
+      "native/ffmpeg/NOTICE.md"
+    ],
+    "macOS": {
+      "frameworks": [
+        "native/ffmpeg/runtime/liblyrico_ffmpeg_bridge.dylib",
+        "native/ffmpeg/runtime/libavformat.62.dylib",
+        "native/ffmpeg/runtime/libavcodec.62.dylib",
+        "native/ffmpeg/runtime/libavutil.60.dylib",
+        "native/ffmpeg/runtime/libswresample.6.dylib"
+      ]
+    }
+  }
+}
