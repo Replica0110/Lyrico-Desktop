@@ -29,7 +29,20 @@
   background: color-mix(in srgb, var(--ant-color-primary-bg) 70%, transparent);
 }
 
-.library-track-list .ant-table-tbody-virtual .ant-table-row:focus-visible {
+.library-track-list .ant-table-row {
+  user-select: none;
+}
+
+.library-table-host:focus {
+  outline: none;
+}
+
+.library-table-host:focus-visible:not(:has(.is-cursor)) {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: -2px;
+}
+
+.library-track-list .ant-table-tbody-virtual .is-cursor {
   outline: 2px solid var(--ant-color-primary);
   outline-offset: -2px;
 }
