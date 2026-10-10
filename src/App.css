@@ -1,6 +1,5 @@
 :root {
   --nav-width: 176px;
-  --titlebar-height: 36px;
   --nav-collapsed-width: 56px;
   --page-padding: 16px;
   --section-gap: 12px;
@@ -18,9 +17,6 @@
   --text-primary: #1f1f1f;
   --text-secondary: rgba(0, 0, 0, 0.65);
   --text-tertiary: rgba(0, 0, 0, 0.45);
-  --titlebar-bg: #ffffff;
-  --titlebar-text: #1f1f1f;
-  --titlebar-border: rgba(5, 5, 5, 0.08);
   --hover-bg: rgba(0, 0, 0, 0.04);
   --app-bg: #f5f5f5;
   --overlay-bg: rgba(0, 0, 0, 0.02);
@@ -38,9 +34,6 @@
   --text-primary: #f0f0f0;
   --text-secondary: rgba(255, 255, 255, 0.65);
   --text-tertiary: rgba(255, 255, 255, 0.45);
-  --titlebar-bg: #1f1f1f;
-  --titlebar-text: #f0f0f0;
-  --titlebar-border: rgba(255, 255, 255, 0.1);
   --hover-bg: rgba(255, 255, 255, 0.06);
   --app-bg: #141414;
   --overlay-bg: rgba(255, 255, 255, 0.04);
@@ -154,70 +147,6 @@ textarea {
   height: 0;
   flex: 1;
   overflow: hidden;
-}
-
-/* Frameless Tauri windows keep their titlebar inside the webview. Portaled
-   overlays must reserve the same strip as the application content. */
-html .ant-modal-root .ant-modal-mask,
-html .ant-modal-root .ant-modal-wrap,
-html .ant-drawer {
-  top: var(--titlebar-height);
-  height: auto;
-}
-
-/* Title Bar */
-.titlebar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: var(--titlebar-height);
-  flex: 0 0 auto;
-  padding: 0 4px 0 16px;
-  background: var(--titlebar-bg);
-  border-bottom: 1px solid var(--titlebar-border);
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.titlebar-brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex: 1;
-  height: 100%;
-}
-
-.titlebar-title {
-  font-size: 13px;
-  color: var(--titlebar-text) !important;
-  line-height: 36px;
-}
-
-.titlebar-controls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 100%;
-}
-
-.titlebar-btn {
-  width: 46px !important;
-  height: 100% !important;
-  border-radius: 0 !important;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--titlebar-text) !important;
-}
-
-.titlebar-btn:hover {
-  background: var(--hover-bg) !important;
-}
-
-.titlebar-btn-close:hover {
-  background: #e81123 !important;
-  color: #fff !important;
 }
 
 .app-main {
@@ -1288,13 +1217,6 @@ html .ant-drawer {
   overflow-wrap: anywhere;
 }
 
-.titlebar-icon {
-  width: 22px;
-  height: 22px;
-  display: block;
-  flex: 0 0 22px;
-  border-radius: var(--surface-radius);
-}
 .tasks-view { height: 100%; min-height: 0; }
 .tasks-body { display: flex; flex-direction: column; gap: var(--section-gap); overflow: hidden; }
 .batch-navigation { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--list-gap); flex: 0 0 auto; }

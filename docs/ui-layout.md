@@ -37,7 +37,7 @@
 所有页面共用一套骨架，`.page-viewport` 是唯一滚动容器（文档本身不滚动）：
 
 ```
-┌ 标题栏 TitleBar ─────────────────────────────────┐
+┌ 系统原生标题栏（WebView 外）──────────────────────┐
 ├ 侧栏 ┬ 页头 PageHeader ──────────────────────────┤
 │      ├ 二级条 SubPageBar（仅二级页面）            │
 │      ├ 内容区（页面自己滚动 / 表格内部滚动）       │
@@ -263,7 +263,7 @@
 
 ## 10. 验收契约
 
-### 10.1 机器契约（`src/app/layoutContract.test.mjs`，必须通过）
+### 10.1 布局检查清单（构建检查与手动走查）
 
 1. 尺寸单一来源：`--nav-width`、`--nav-collapsed-width`、`--header-height`、`--bar-height`、`--row-height`、`--page-title-size` 在 CSS 中各定义一次，且被组件引用。
 2. 页面骨架单一来源：每个页面文件都使用 `PageHeader`；二级页面使用 `SubPageBar`；不出现自写 `<header className="...-page-header"`。
@@ -314,8 +314,8 @@ npx --yes --package @playwright/cli playwright-cli --session layout run-code --f
 
 ## 12. 任务与反馈（2026-10-09）
 
-- 标题栏高度统一使用 `--titlebar-height`，Message 距窗口顶端为标题栏高度加 12px，不能覆盖窗口按钮。
-- 无边框窗口的自定义标题栏属于 WebView；Modal 的遮罩和点击层、Drawer 根节点统一从 `--titlebar-height` 下方开始，弹窗居中范围为剩余内容区域。打开弹层时仍须能拖动窗口、最小化、最大化/还原和关闭。参见 [Tauri 窗口自定义](https://v2.tauri.app/zh-cn/learn/window-customization/)。
+- 窗口使用 Tauri 原生标题栏（`decorations: true`）；窗口按钮位于 WebView 之外，Modal、Drawer、Message、Notification 均使用正常内容区域，不为标题栏逐组件增加偏移。Message 距内容顶端 12px。参见 [Tauri WindowConfig](https://v2.tauri.app/reference/config/#windowconfig)。
+- 原生窗口主题同步应用的浅色/深色设置；“跟随系统”通过 `setTheme(null)` 恢复系统主题，需启用 `core:window:allow-set-theme`。
 - 状态栏固定 30px；全局扫描、回放增益和批任务摘要只占状态栏，不在页头插入进度条。点击摘要显示上方悬浮详情，回放增益可取消，批任务可跳转到批处理页。任务出现、结束都不改变内容区域几何。
 - 短操作使用 Message；扫描及批任务完成使用右下角 Notification；部分失败/失败通知保留到手动关闭，并提供任务入口。相同终态事件只提醒一次。
 - 卸载插件、删除歌曲、移除目录、删除历史使用居中 Modal，明确取消与危险确认按钮。
