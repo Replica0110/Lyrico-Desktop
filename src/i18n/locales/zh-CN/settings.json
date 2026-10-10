@@ -76,7 +76,18 @@
     "reportIssue": "问题反馈",
     "logsDirectory": "日志目录",
     "logsOpenDirectory": "打开日志目录",
-    "logsFileHint": "日志自动保存，文件达到 5 MiB 时轮转，保留 5 个历史文件"
+    "logsFileHint": "日志自动保存，文件达到 5 MiB 时轮转，保留 5 个历史文件",
+    "addCustomField": "添加自定义字段",
+    "customKeysFromLibrary": "从音乐库选择标签键",
+    "customKeyHint": "键名最多 64 个字符，自动去除首尾空白并转为大写",
+    "customKeyInvalid": "键名不能超过 64 个字符或包含换行",
+    "customKeyEmpty": "请输入标签键",
+    "customKeyDuplicate": "该字段已存在",
+    "removeCustomField": "删除 {{name}}",
+    "removeCustomFieldConfirm": "仅移除编辑字段配置，音频文件中的标签会保留",
+    "resetFields": "恢复默认",
+    "resetFieldsConfirm": "恢复字段顺序和显示设置，并移除自定义字段配置",
+    "customKeysUnreadable": "{{count}} 个文件无法读取，列表可能不完整"
   },
   "artistSplit": {
     "artistSeparator": "艺术家值分隔符",

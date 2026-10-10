@@ -1,5 +1,5 @@
 import { enabledPluginSources } from "../data/pluginSources";
-import { DeleteOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, SearchOutlined, ShareAltOutlined } from "@ant-design/icons";
+import { DeleteOutlined, PlusOutlined, UndoOutlined, ReloadOutlined, SaveOutlined, SearchOutlined, ShareAltOutlined } from "@ant-design/icons";
 import { Alert, Avatar, Button, Checkbox, Descriptions, Drawer, Empty, Flex, Form, Input, InputNumber, List, Modal, Rate, Segmented, Select, Space, Spin, Tabs, Typography } from "antd";
 import type { FormInstance } from "antd";
 import type { TFunction } from "i18next";
@@ -17,7 +17,7 @@ import { RemoteArtwork } from "./RemoteArtwork";
 import { useRemoteImage } from "../hooks/useRemoteImage";
 import { useReplayGainProgress } from "../hooks/useReplayGainProgress";
 import { defaultOnlineSearchKeyword } from "../domain/search";
-import { normalizeEditFieldOrder, EDIT_FIELD_LABEL_KEYS, toEditFieldBlocks } from "../domain/editFieldSettings";
+import { customTagKeyOf, normalizeCustomTagKey, withAddedCustomTag, normalizeEditFieldOrder, EDIT_FIELD_LABEL_KEYS, toEditFieldBlocks } from "../domain/editFieldSettings";
 import "./SongResultReview.css";
 
 const { Text } = Typography;
@@ -28,6 +28,8 @@ export function SongDetails({
   track,
   plugins,
   settings,
+  originalCustomTags,
+  onChangeSettings,
   form,
   saving,
   onSave,
@@ -50,6 +52,8 @@ export function SongDetails({
   track?: AudioTrack;
   plugins: SourcePlugin[];
   settings: DesktopSettings;
+  originalCustomTags: CustomTag[];
+  onChangeSettings: (settings: DesktopSettings) => void;
   form: FormInstance<TagForm>;
   saving: boolean;
   onSave: () => void;
@@ -127,7 +131,7 @@ export function SongDetails({
             destroyOnHidden={false}
             onChange={setActiveTab}
             items={[
-              { key: "local", label: t("details.localTags"), children: <LocalTagEditor form={form} settings={settings} replayGainProgress={replayGainProgress} onCalculateReplayGain={onCalculateReplayGain} onCancelReplayGain={onCancelReplayGain} onImportLyrics={onImportLyrics} onExportLyrics={onExportLyrics} /> },
+              { key: "local", label: t("details.localTags"), children: <LocalTagEditor form={form} settings={settings} originalCustomTags={originalCustomTags} onChangeSettings={onChangeSettings} replayGainProgress={replayGainProgress} onCalculateReplayGain={onCalculateReplayGain} onCancelReplayGain={onCancelReplayGain} onImportLyrics={onImportLyrics} onExportLyrics={onExportLyrics} /> },
               { key: "online", label: t("details.onlineMatch"), children: <OnlineMatch key={track.path} track={track} plugins={plugins} settings={settings} form={form} onApplied={() => setActiveTab("local")} /> },
               { key: "file", label: t("details.fileInfo"), children: <FileInformation track={track} /> },
             ]}
@@ -928,8 +932,24 @@ function tagFieldLabel(key: keyof TagForm, t: TFunction) {
   return t(labels[key] ?? String(key));
 }
 
-function LocalTagEditor({ form, settings, replayGainProgress, onCalculateReplayGain, onCancelReplayGain, onImportLyrics, onExportLyrics }: { form: FormInstance<TagForm>; settings: DesktopSettings; replayGainProgress?: ReplayGainProgress; onCalculateReplayGain: () => void; onCancelReplayGain: () => void; onImportLyrics: () => void; onExportLyrics: () => void }) {
+function LocalTagEditor({ form, settings, originalCustomTags, onChangeSettings, replayGainProgress, onCalculateReplayGain, onCancelReplayGain, onImportLyrics, onExportLyrics }: { form: FormInstance<TagForm>; settings: DesktopSettings; originalCustomTags: CustomTag[]; onChangeSettings: (settings: DesktopSettings) => void; replayGainProgress?: ReplayGainProgress; onCalculateReplayGain: () => void; onCancelReplayGain: () => void; onImportLyrics: () => void; onExportLyrics: () => void }) {
   const { t } = useTranslation();
+  const [addingCustom, setAddingCustom] = useState(false);
+  const [customKeyInput, setCustomKeyInput] = useState("");
+  const [customValueInput, setCustomValueInput] = useState("");
+  const [customError, setCustomError] = useState<string>();
+  function setCustomValues(key: string, values: string[]) {
+    const tags: CustomTag[] = form.getFieldValue("customTags") ?? [];
+    form.setFieldValue("customTags", [...tags.filter(tag => normalizeCustomTagKey(tag.key) !== key), { key, values }]);
+  }
+  function addCustomField() {
+    const key = normalizeCustomTagKey(customKeyInput);
+    if (!key) { setCustomError(t(customKeyInput.trim() ? "settings.customKeyInvalid" : "settings.customKeyEmpty")); return; }
+    const next = withAddedCustomTag(settings, key);
+    onChangeSettings({ ...next, editFieldVisibility: { ...next.editFieldVisibility, [`tag:${key}`]: true } });
+    setCustomValues(key, customValueInput.split(/\r?\n/));
+    setAddingCustom(false);
+  }
   const showField = (key: string) => settings.editFieldVisibility?.[key] !== false;
   const [plainLyricsOpen, setPlainLyricsOpen] = useState(false);
   const [plainLyrics, setPlainLyrics] = useState("");
@@ -1004,11 +1024,26 @@ function LocalTagEditor({ form, settings, replayGainProgress, onCalculateReplayG
         <Input.TextArea aria-label={t("details.lyrics")} autoSize={{ minRows: 8, maxRows: 18 }} />
       </Form.Item>
     </section>;
-  const blocks = toEditFieldBlocks(normalizeEditFieldOrder(settings.editFieldOrder));
+  const blocks = toEditFieldBlocks(normalizeEditFieldOrder(settings.editFieldOrder, settings.editCustomTags));
   const labels = Object.fromEntries(EDIT_FIELD_LABEL_KEYS);
   function renderField(key: string) {
     if (key === "lyrics") return lyricsEditor;
-    if (key === "customTags") return <Form.Item name="customTags" label={t(labels[key])}><CustomTagsEditor /></Form.Item>;
+    const customKey = customTagKeyOf(key);
+    if (customKey) return <Flex gap={4} align="start">
+      <Form.Item style={{ flex: 1, minWidth: 0 }} name="customTags" label={customKey}
+      getValueProps={(tags: CustomTag[] = []) => ({ value: tags.find(tag => normalizeCustomTagKey(tag.key) === customKey)?.values.join("\n") ?? "" })}
+      getValueFromEvent={event => {
+        const tags: CustomTag[] = form.getFieldValue("customTags") ?? [];
+        const values = event.target.value.split(/\r?\n/);
+        const existing = tags.some(tag => normalizeCustomTagKey(tag.key) === customKey);
+        return existing ? tags.map(tag => normalizeCustomTagKey(tag.key) === customKey ? { ...tag, values } : tag) : [...tags, { key: customKey, values }];
+      }}><Input.TextArea autoSize={{ minRows: 1, maxRows: 4 }} aria-label={customKey} /></Form.Item>
+      <Button type="text" icon={<DeleteOutlined />} aria-label={t("tasks.clearNamedField", { name: customKey })} onClick={() => setCustomValues(customKey, [])} />
+      <Button type="text" icon={<UndoOutlined />} aria-label={t("tasks.restoreField", { name: customKey })} onClick={() => {
+        const values = originalCustomTags.find(tag => normalizeCustomTagKey(tag.key) === customKey)?.values ?? [];
+        setCustomValues(customKey, values);
+      }} />
+    </Flex>;
     if (key === "rating") return <Form.Item name="rating" label={t(labels[key])}><Rate /></Form.Item>;
     if (key === "genre") return <Form.Item name="genre" label={t(labels[key])}><Select mode="tags" tokenSeparators={[";", "/", ","]} open={false} /></Form.Item>;
     return <Form.Item name={key} label={t(labels[key])}>
@@ -1047,58 +1082,18 @@ function LocalTagEditor({ form, settings, replayGainProgress, onCalculateReplayG
           </div>;
         })}
       </div>
+      <Button type="dashed" icon={<PlusOutlined />} onClick={() => { setCustomKeyInput(""); setCustomValueInput(""); setCustomError(undefined); setAddingCustom(true); }}>{t("settings.addCustomField")}</Button>
     </Form>
+    <Modal centered open={addingCustom} title={t("settings.addCustomField")} onCancel={() => setAddingCustom(false)} onOk={addCustomField}>
+      <Space orientation="vertical" className="full-width">
+        <Input aria-label={t("details.customTagKey")} placeholder={t("details.customTagKey")} value={customKeyInput} onChange={event => { setCustomKeyInput(event.target.value); setCustomError(undefined); }} status={customError ? "error" : undefined} />
+        <Input.TextArea aria-label={t("details.customTagValue")} placeholder={t("details.customTagValue")} value={customValueInput} onChange={event => setCustomValueInput(event.target.value)} />
+        {customError ? <Text type="danger">{customError}</Text> : null}
+      </Space>
+    </Modal>
     <Modal centered title={t("lyrics.plainText")} open={plainLyricsOpen} footer={null} onCancel={() => setPlainLyricsOpen(false)}>
       <Input.TextArea value={plainLyrics} readOnly autoSize={{ minRows: 10, maxRows: 20 }} />
     </Modal>
     </>
-  );
-}
-
-function CustomTagsEditor({
-  value = [],
-  onChange,
-}: {
-  value?: CustomTag[];
-  onChange?: (value: CustomTag[]) => void;
-}) {
-  const { t } = useTranslation();
-  const tags = Array.isArray(value) ? value : [];
-  const update = (index: number, patch: Partial<CustomTag>) => {
-    const next = tags.map((tag, tagIndex) => tagIndex === index ? { ...tag, ...patch } : tag);
-    onChange?.(next);
-  };
-  return (
-    <Space orientation="vertical" size={10} style={{ width: "100%" }}>
-      {tags.map((tag, index) => (
-        <Flex key={index} gap={8} align="start">
-          <Input
-            value={tag.key}
-            placeholder={t("details.customTagKey")}
-            onChange={(event) => update(index, { key: event.target.value })}
-          />
-          <Input.TextArea
-            value={tag.values.join("\n")}
-            placeholder={t("details.customTagValue")}
-            autoSize={{ minRows: 1, maxRows: 4 }}
-            onChange={(event) => update(index, { values: event.target.value.split(/\r?\n/) })}
-          />
-          <Button
-            danger
-            type="text"
-            icon={<DeleteOutlined />}
-            aria-label={t("common.remove")}
-            onClick={() => onChange?.(tags.filter((_, tagIndex) => tagIndex !== index))}
-          />
-        </Flex>
-      ))}
-      <Button
-        type="dashed"
-        icon={<PlusOutlined />}
-        onClick={() => onChange?.([...tags, { key: "", values: [""] }])}
-      >
-        {t("details.addCustomTag")}
-      </Button>
-    </Space>
   );
 }

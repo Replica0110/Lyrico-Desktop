@@ -76,7 +76,18 @@
     "reportIssue": "Report an issue",
     "logsDirectory": "Log directory",
     "logsOpenDirectory": "Open log directory",
-    "logsFileHint": "Logs are saved automatically, rotated at 5 MiB, with 5 archived files retained"
+    "logsFileHint": "Logs are saved automatically, rotated at 5 MiB, with 5 archived files retained",
+    "addCustomField": "Add custom field",
+    "customKeysFromLibrary": "Choose a tag key from the library",
+    "customKeyHint": "Up to 64 characters; trimmed and converted to uppercase",
+    "customKeyInvalid": "Keys cannot exceed 64 characters or contain line breaks",
+    "customKeyEmpty": "Enter a tag key",
+    "customKeyDuplicate": "This field already exists",
+    "removeCustomField": "Remove {{name}}",
+    "removeCustomFieldConfirm": "Remove the editor configuration only. Tags in audio files are preserved",
+    "resetFields": "Reset to defaults",
+    "resetFieldsConfirm": "Reset field order and visibility and remove custom field configuration",
+    "customKeysUnreadable": "{{count}} files could not be read; the list may be incomplete"
   },
   "artistSplit": {
     "artistSeparator": "Artist value separator",

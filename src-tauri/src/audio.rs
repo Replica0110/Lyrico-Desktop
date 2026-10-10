@@ -352,18 +352,48 @@ pub(crate) fn read_custom_tags(path: &Path) -> Result<Vec<CustomTag>, String> {
 fn normalize_custom_tags(tags: &[CustomTag]) -> Result<Properties, String> {
     let mut result = BTreeMap::new();
     for tag in tags {
-        let key = tag.key.trim().to_ascii_uppercase();
+        // Existing file keys may exceed the editor's 64-character limit. Preserve them.
+        let key = tag.key.trim().to_uppercase();
         if key.is_empty()
             || key.chars().any(|character| character.is_control())
             || is_standard_property(&key)
         {
             return Err(format!("Invalid or reserved custom tag key: {key}"));
         }
-        if result.insert(key.clone(), tag.values.clone()).is_some() {
+        let values = tag
+            .values
+            .iter()
+            .filter(|value| !value.is_empty())
+            .cloned()
+            .collect();
+        if result.insert(key.clone(), values).is_some() {
             return Err(format!("Duplicate custom tag key: {key}"));
         }
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod custom_tag_tests {
+    use super::*;
+
+    #[test]
+    fn saving_preserves_existing_long_keys_and_clears_empty_values() {
+        let key = "X".repeat(65);
+        let properties = normalize_custom_tags(&[
+            CustomTag {
+                key: key.clone(),
+                values: vec!["keep".to_string()],
+            },
+            CustomTag {
+                key: "MOOD".to_string(),
+                values: vec![String::new()],
+            },
+        ])
+        .unwrap();
+        assert_eq!(properties[&key], ["keep"]);
+        assert!(properties["MOOD"].is_empty());
+    }
 }
 fn is_standard_property(key: &str) -> bool {
     matches!(

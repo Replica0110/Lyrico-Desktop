@@ -22,23 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-
-# Native dependency downloads and local build output
 src-tauri/native/taglib/_deps/
-
-# Local agent state
-.opencode/
-test-lofty/target/
-
-# Local browser verification artifacts
 .playwright-cli/
-output/playwright/
-
-# Native CMake build directory
 build/
-
-# FFmpeg runtime is built from its pinned source submodule
 src-tauri/native/ffmpeg/runtime/
-output/ffmpeg-sdk/
-output/ffmpeg-validation/
-output/build-tools/
+output/

@@ -34,6 +34,7 @@ pub(crate) struct DesktopSettings {
     pub(crate) theme_mode: String,
     pub(crate) edit_field_visibility: BTreeMap<String, bool>,
     pub(crate) edit_field_order: Vec<String>,
+    pub(crate) edit_custom_tags: Vec<String>,
 }
 
 pub(crate) const EDIT_FIELD_KEYS: &[&str] = &[
@@ -50,7 +51,6 @@ pub(crate) const EDIT_FIELD_KEYS: &[&str] = &[
     "lyricist",
     "copyright",
     "comment",
-    "customTags",
     "rating",
     "lyrics",
     "replayGainTrackGain",
@@ -82,6 +82,7 @@ impl Default for DesktopSettings {
             theme_mode: "system".to_string(),
             edit_field_visibility: BTreeMap::new(),
             edit_field_order: default_edit_field_order(),
+            edit_custom_tags: Vec::new(),
         }
     }
 }
@@ -143,8 +144,17 @@ fn normalize_settings(mut settings: DesktopSettings) -> DesktopSettings {
     settings.hidden_folder_paths =
         normalize_folder_paths(std::mem::take(&mut settings.hidden_folder_paths));
     settings.artist_poster_folder = settings.artist_poster_folder.trim().to_string();
-    settings.edit_field_order =
-        normalize_edit_field_order(std::mem::take(&mut settings.edit_field_order));
+    settings.edit_custom_tags = normalize_custom_tag_keys(settings.edit_custom_tags);
+    let custom_codes: Vec<String> = settings
+        .edit_custom_tags
+        .iter()
+        .map(|key| format!("tag:{key}"))
+        .collect();
+    let order = std::mem::take(&mut settings.edit_field_order)
+        .into_iter()
+        .map(normalize_edit_field_code)
+        .collect();
+    settings.edit_field_order = normalize_edit_field_order_with_custom(order, &custom_codes);
     if !matches!(settings.theme_mode.as_str(), "system" | "light" | "dark") {
         settings.theme_mode = DesktopSettings::default().theme_mode;
     }
@@ -158,7 +168,8 @@ fn normalize_settings(mut settings: DesktopSettings) -> DesktopSettings {
     settings.edit_field_visibility = settings
         .edit_field_visibility
         .into_iter()
-        .filter(|(key, _)| EDIT_FIELD_KEYS.contains(&key.as_str()))
+        .map(|(key, value)| (normalize_edit_field_code(key), value))
+        .filter(|(key, _)| EDIT_FIELD_KEYS.contains(&key.as_str()) || custom_codes.contains(key))
         .collect();
     settings
 }
@@ -251,9 +262,42 @@ fn default_edit_field_order() -> Vec<String> {
     EDIT_FIELD_KEYS.iter().map(|key| key.to_string()).collect()
 }
 
-fn normalize_edit_field_order(order: Vec<String>) -> Vec<String> {
+pub(crate) fn normalize_custom_tag_key(input: &str) -> Option<String> {
+    let key = input.trim();
+    if key.is_empty() || key.encode_utf16().count() > 64 || key.contains(['\r', '\n']) {
+        None
+    } else {
+        Some(key.to_uppercase())
+    }
+}
+
+fn normalize_edit_field_code(code: String) -> String {
+    code.strip_prefix("tag:")
+        .and_then(normalize_custom_tag_key)
+        .map(|key| format!("tag:{key}"))
+        .unwrap_or(code)
+}
+
+fn normalize_custom_tag_keys(keys: Vec<String>) -> Vec<String> {
     let mut normalized = Vec::new();
-    for value in order.into_iter().chain(default_edit_field_order()) {
+    for key in keys.iter().filter_map(|key| normalize_custom_tag_key(key)) {
+        if !normalized.contains(&key) {
+            normalized.push(key);
+        }
+    }
+    normalized
+}
+
+fn normalize_edit_field_order_with_custom(
+    order: Vec<String>,
+    custom_codes: &[String],
+) -> Vec<String> {
+    let mut normalized = Vec::new();
+    for value in order
+        .into_iter()
+        .chain(default_edit_field_order())
+        .chain(custom_codes.iter().cloned())
+    {
         let expanded: Vec<&str> = match value.as_str() {
             "basic" => vec![
                 "title",
@@ -277,7 +321,9 @@ fn normalize_edit_field_order(order: Vec<String>) -> Vec<String> {
             key => vec![key],
         };
         for key in expanded {
-            if EDIT_FIELD_KEYS.contains(&key) && !normalized.iter().any(|item| item == key) {
+            if (EDIT_FIELD_KEYS.contains(&key) || custom_codes.iter().any(|code| code == key))
+                && !normalized.iter().any(|item| item == key)
+            {
                 normalized.push(key.to_string());
             }
         }
@@ -439,4 +485,46 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
         fs::copy(path, &backup).map_err(|error| error.to_string())?;
     }
     fs::rename(&temporary, path).map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod custom_field_tests {
+    use super::*;
+
+    #[test]
+    fn configured_custom_fields_survive_round_trip_and_keep_visibility_and_order() {
+        let settings: DesktopSettings = serde_json::from_value(serde_json::json!({
+            "editCustomTags": [" mood ", "MOOD", "LABEL", "", "bad\nkey"],
+            "editFieldOrder": ["tag:label", "title", "tag:mood", "tag:DELETED"],
+            "editFieldVisibility": { "tag:mood": false, "tag:DELETED": false }
+        }))
+        .unwrap();
+        let normalized = normalize_settings(settings);
+        let restored = normalize_settings(
+            serde_json::from_str(&serde_json::to_string(&normalized).unwrap()).unwrap(),
+        );
+        assert_eq!(restored.edit_custom_tags, ["MOOD", "LABEL"]);
+        assert_eq!(
+            &restored.edit_field_order[..3],
+            ["tag:LABEL", "title", "tag:MOOD"]
+        );
+        assert_eq!(restored.edit_field_visibility.get("tag:MOOD"), Some(&false));
+        assert!(!restored
+            .edit_field_order
+            .contains(&"tag:DELETED".to_string()));
+        assert!(!restored.edit_field_visibility.contains_key("tag:DELETED"));
+    }
+
+    #[test]
+    fn old_settings_keep_defaults_and_custom_key_validation_matches_mobile() {
+        let settings = normalize_settings(serde_json::from_str("{}").unwrap());
+        assert!(settings.edit_custom_tags.is_empty());
+        assert_eq!(settings.edit_field_order, default_edit_field_order());
+        assert_eq!(
+            normalize_custom_tag_key("  mood  "),
+            Some("MOOD".to_string())
+        );
+        assert!(normalize_custom_tag_key(&"a".repeat(65)).is_none());
+        assert!(normalize_custom_tag_key("a\nb").is_none());
+    }
 }

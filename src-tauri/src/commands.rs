@@ -1229,6 +1229,32 @@ pub(crate) async fn load_custom_tags(
 }
 
 #[tauri::command]
+pub(crate) async fn load_library_custom_tag_keys(
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let tracks = database.load_tracks_blocking()?;
+        let mut counts = std::collections::BTreeMap::<String, usize>::new();
+        let mut unreadable = 0;
+        for track in tracks {
+            match crate::audio::read_custom_tags(Path::new(&track.path)) {
+                Ok(tags) => {
+                    let keys: std::collections::BTreeSet<_> = tags.iter()
+                        .filter(|tag| tag.values.iter().any(|value| !value.trim().is_empty()))
+                        .filter_map(|tag| app_config::normalize_custom_tag_key(&tag.key)).collect();
+                    for key in keys { *counts.entry(key).or_default() += 1; }
+                }
+                Err(_) => unreadable += 1,
+            }
+        }
+        let mut keys: Vec<_> = counts.into_iter().collect();
+        keys.sort_by(|(ka, ca), (kb, cb)| cb.cmp(ca).then_with(|| ka.cmp(kb)));
+        Ok::<_, String>(serde_json::json!({ "keys": keys.into_iter().map(|(key, _)| key).collect::<Vec<_>>(), "unreadable": unreadable }))
+    }).await.map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 pub(crate) async fn import_config(
     app: AppHandle,
     state: State<'_, AppState>,

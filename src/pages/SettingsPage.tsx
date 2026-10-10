@@ -1,4 +1,4 @@
-import { ApiOutlined, AudioOutlined, EditOutlined, FileTextOutlined, FolderOpenOutlined, GlobalOutlined, InfoCircleOutlined, ImportOutlined, ExportOutlined, ScissorOutlined, SoundOutlined } from "@ant-design/icons";
+import { DeleteOutlined, PlusOutlined, ReloadOutlined, ApiOutlined, AudioOutlined, EditOutlined, FileTextOutlined, FolderOpenOutlined, GlobalOutlined, InfoCircleOutlined, ImportOutlined, ExportOutlined, ScissorOutlined, SoundOutlined } from "@ant-design/icons";
 import { App as AntApp, Avatar, Button, Flex, Input, InputNumber, Modal, Select, Space, Switch, Tabs, Typography } from "antd";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getVersion } from "@tauri-apps/api/app";
@@ -10,9 +10,9 @@ import { SortableList } from "../components/SortableList";
 import appIcon from "../assets/app-icon.png";
 import { ArtistSplitSettings } from "../components/ArtistSplitSettings";
 import { PageHeader } from "../components/PageHeader";
-import { exportConfig, importConfig, openLogsDirectory, pickPaths, pickSavePath, type ThemeMode } from "../backend/audioApi";
+import { loadLibraryCustomTagKeys, exportConfig, importConfig, openLogsDirectory, pickPaths, pickSavePath, type ThemeMode } from "../backend/audioApi";
 import { normalizeCleanupKeywords, normalizeLyricLineOrder } from "../domain/lyricsSettings";
-import { normalizeEditFieldOrder, EDIT_FIELD_LABEL_KEYS, REPLAY_GAIN_BLOCK_KEY, toEditFieldBlocks, withEditFieldBlockMembers } from "../domain/editFieldSettings";
+import { customTagKeyOf, normalizeCustomTagKey, withAddedCustomTag, withRemovedCustomTag, normalizeEditFieldOrder, EDIT_FIELD_LABEL_KEYS, REPLAY_GAIN_BLOCK_KEY, toEditFieldBlocks, withEditFieldBlockMembers } from "../domain/editFieldSettings";
 import { CONTRIBUTORS } from "../data/contributors";
 
 const { Text } = Typography;
@@ -256,9 +256,36 @@ function SettingsSection({ title, children }: { title: string; children: ReactNo
  */
 function EditFieldOrderEditor({ settings, onChange }: { settings: DesktopSettings; onChange: (settings: DesktopSettings) => void }) {
   const { t } = useTranslation();
+  const { modal } = AntApp.useApp();
+  const [adding, setAdding] = useState(false);
+  const [input, setInput] = useState("");
+  const [inputError, setInputError] = useState<string>();
+  const [available, setAvailable] = useState<string[]>([]);
+  const [loadingKeys, setLoadingKeys] = useState(false);
+  const [keysError, setKeysError] = useState<string>();
   const [openBlock, setOpenBlock] = useState<string>();
-  const blocks = useMemo(() => toEditFieldBlocks(normalizeEditFieldOrder(settings.editFieldOrder)), [settings.editFieldOrder]);
-  const labelOf = (key: string) => t(EDIT_FIELD_LABEL_KEYS.find(([field]) => field === key)?.[1] ?? key);
+  useEffect(() => {
+    if (!adding) return;
+    let active = true;
+    setLoadingKeys(true);
+    setKeysError(undefined);
+    loadLibraryCustomTagKeys().then(result => {
+      if (!active) return;
+      setAvailable(result.keys);
+      if (result.unreadable) setKeysError(t("settings.customKeysUnreadable", { count: result.unreadable }));
+    }).catch(error => { if (active) setKeysError(String(error)); })
+      .finally(() => { if (active) setLoadingKeys(false); });
+    return () => { active = false; };
+  }, [adding, t]);
+  function addKey(key: string) {
+    const normalized = normalizeCustomTagKey(key);
+    if (!normalized) { setInputError(t(key.trim() ? "settings.customKeyInvalid" : "settings.customKeyEmpty")); return; }
+    if (settings.editCustomTags.includes(normalized)) { setInputError(t("settings.customKeyDuplicate")); return; }
+    onChange(withAddedCustomTag(settings, normalized));
+    setAdding(false);
+  }
+  const blocks = useMemo(() => toEditFieldBlocks(normalizeEditFieldOrder(settings.editFieldOrder, settings.editCustomTags)), [settings.editFieldOrder, settings.editCustomTags]);
+  const labelOf = (key: string) => customTagKeyOf(key) ?? t(EDIT_FIELD_LABEL_KEYS.find(([field]) => field === key)?.[1] ?? key);
   const shown = (key: string) => settings.editFieldVisibility?.[key] !== false;
   const setShown = (key: string, checked: boolean) =>
     onChange({ ...settings, editFieldVisibility: { ...settings.editFieldVisibility, [key]: checked } });
@@ -269,6 +296,18 @@ function EditFieldOrderEditor({ settings, onChange }: { settings: DesktopSetting
 
   return (
     <>
+      <Flex gap={8} justify="end" style={{ marginBottom: 12 }}>
+        <Button icon={<ReloadOutlined />} onClick={() => modal.confirm({ centered: true, title: t("settings.resetFields"), content: t("settings.resetFieldsConfirm"), onOk: () => onChange({ ...settings, editCustomTags: [], editFieldOrder: normalizeEditFieldOrder([]), editFieldVisibility: {} }) })}>{t("settings.resetFields")}</Button>
+        <Button icon={<PlusOutlined />} onClick={() => { setInput(""); setInputError(undefined); setAvailable([]); setAdding(true); }}>{t("settings.addCustomField")}</Button>
+      </Flex>
+      <Modal centered open={adding} title={t("settings.addCustomField")} onCancel={() => setAdding(false)} onOk={() => addKey(input)}>
+        <Space orientation="vertical" className="full-width">
+          <Select className="full-width" loading={loadingKeys} placeholder={t("settings.customKeysFromLibrary")} value={undefined} options={available.filter(key => !settings.editCustomTags.includes(key)).map(key => ({ value: key, label: key }))} onChange={addKey} />
+          {keysError ? <Text type="warning">{keysError}</Text> : null}
+          <Input aria-label={t("details.customTagKey")} placeholder={t("details.customTagKey")} value={input} status={inputError ? "error" : undefined} onChange={event => { setInput(event.target.value); setInputError(undefined); }} onPressEnter={() => addKey(input)} />
+          <Text type={inputError ? "danger" : "secondary"}>{inputError ?? t("settings.customKeyHint")}</Text>
+        </Space>
+      </Modal>
       <SortableList
         items={blocks.map((block) => block.key)}
         label={t("settings.editFields")}
@@ -281,13 +320,16 @@ function EditFieldOrderEditor({ settings, onChange }: { settings: DesktopSetting
           const block = blocks.find((candidate) => candidate.key === key);
           if (!block?.composite) {
             return <>
-              <Text>{labelOf(key)}</Text>
+              <Text ellipsis={{ tooltip: labelOf(key) }} style={{ flex: 1, minWidth: 0 }}>{labelOf(key)}</Text>
+              <Space size={4}>
+              {customTagKeyOf(key) ? <Button type="text" danger size="small" icon={<DeleteOutlined />} aria-label={t("settings.removeCustomField", { name: labelOf(key) })} onClick={() => modal.confirm({ centered: true, title: t("settings.removeCustomField", { name: labelOf(key) }), content: t("settings.removeCustomFieldConfirm"), okButtonProps: { danger: true }, onOk: () => onChange(withRemovedCustomTag(settings, customTagKeyOf(key)!)) })} /> : null}
               <Switch
                 size="small"
                 aria-label={t("settings.showField", { name: labelOf(key) })}
                 checked={shown(key)}
                 onChange={(checked) => setShown(key, checked)}
               />
+              </Space>
             </>;
           }
           const allShown = block.fields.every(shown);
@@ -321,7 +363,7 @@ function EditFieldOrderEditor({ settings, onChange }: { settings: DesktopSetting
             labelFor={labelOf}
             onChange={(members) => onChange({
               ...settings,
-              editFieldOrder: withEditFieldBlockMembers(settings.editFieldOrder, composite.key, members),
+              editFieldOrder: withEditFieldBlockMembers(settings.editFieldOrder, composite.key, members, settings.editCustomTags),
             })}
             renderItem={(field) => <>
               <Text>{labelOf(field)}</Text>

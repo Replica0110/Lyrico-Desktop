@@ -51,6 +51,7 @@ import { FoldersPage } from "../pages/FoldersPage";
 import { SongsPage } from "../pages/SongsPage";
 import { defaultArtistSplitConfig, filterTracks, groupAlbums, groupArtists } from "../domain/library";
 import { completeTagForm, splitGenreValues } from "../domain/tagForm";
+import { filterHiddenCustomTagEdits } from "../domain/editFieldSettings";
 import { detectLyricsFormat } from "../backend/lyricsApi";
 import { invalidateCachedCovers, updateCachedCover } from "../hooks/useTrackCovers";
 import { applyBatchLibraryUpdate, libraryPathsToRefresh } from "../domain/libraryRefresh";
@@ -94,13 +95,14 @@ const defaultDesktopSettings: DesktopSettings = {
   artistPosterFolder: "",
   themeMode: "system",
   editFieldVisibility: {},
+  editCustomTags: [],
   editFieldOrder: ["basic", "track", "credits", "customTags", "replaygain", "lyrics", "cover"],
   renameCharacterMappings: {
     "\\": "＼", "/": "／", ":": "：", "*": "＊", "?": "？", "\"": "＂", "<": "＜", ">": "＞", "|": "｜",
   },
 };
 
-const desktopSettingsArrayFields = ["lyricLineOrder", "removeTagLineKeywords", "hiddenFolderPaths", "editFieldOrder"] as const;
+const desktopSettingsArrayFields = ["lyricLineOrder", "removeTagLineKeywords", "hiddenFolderPaths", "editFieldOrder", "editCustomTags"] as const;
 const desktopSettingsRecordFields = ["renameCharacterMappings", "editFieldVisibility"] as const;
 
 /**
@@ -595,6 +597,7 @@ function LyricoDesktop() {
     try {
       await form.validateFields();
       const values = completeTagForm(form.getFieldsValue(true), selectedTrack);
+      values.customTags = filterHiddenCustomTagEdits(values.customTags, detailCustomTags, desktopSettings);
       const saved = await saveAudioTags(requestedPath, values);
       const nextTrack = replaceTrack(saved);
       if (!nextTrack) {
@@ -1112,6 +1115,8 @@ function LyricoDesktop() {
         track={selectedTrack}
         plugins={plugins}
         settings={desktopSettings}
+        originalCustomTags={detailCustomTags}
+        onChangeSettings={changeDesktopSettings}
         form={form}
         saving={saving}
         onSave={saveSelected}

@@ -143,6 +143,7 @@ export type DesktopSettings = {
   replayGainPeakMode: "samplePeak" | "truePeak";
   editFieldVisibility: Record<string, boolean>;
   editFieldOrder: string[];
+  editCustomTags: string[];
 };
 
 export type LyricLineTrack = "original" | "translation" | "romanization";

@@ -17,8 +17,8 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { App, Button, Checkbox, Flex, Input, InputNumber, Modal, Rate, Select, Space, Table, Tag, Segmented, Switch, Tooltip, Typography, type TableColumnsType } from "antd";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
-import type { AudioTrack, BatchTask, BatchTaskItem, CharacterMappingRule, DesktopSettings, RenamePreview, SourcePlugin } from "../app/types";
-import { cancelBatchTask, createBatchTask, deleteBatchTasks, loadBatchTasks, loadBatchTaskItems, pickPaths, previewBatchRename, readImageFile, retryFailedBatchItems, startBatchTask } from "../backend/audioApi";
+import type { AudioTrack, BatchTask, BatchTaskItem, CharacterMappingRule, CustomTag, DesktopSettings, RenamePreview, SourcePlugin } from "../app/types";
+import { cancelBatchTask, createBatchTask, deleteBatchTasks, loadCustomTags, loadBatchTasks, loadBatchTaskItems, pickPaths, previewBatchRename, readImageFile, retryFailedBatchItems, startBatchTask } from "../backend/audioApi";
 import { TrackArtwork } from "../components/TrackArtwork";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
@@ -29,7 +29,7 @@ import { clearFinishedTask, currentActiveTask, isActiveTask, mergeBatchTaskSnaps
 import { hasBatchField, batchFieldValue, taskOperationKey } from "../domain/batchPresentation";
 import { buildMatchTargetModes, type BatchMatchMode } from "../domain/batchMatch";
 import { formatTimeValue, parseTimeValue } from "../utils/format";
-import { normalizeEditFieldOrder } from "../domain/editFieldSettings";
+import { customTagKeyOf, normalizeCustomTagKey, normalizeEditFieldOrder } from "../domain/editFieldSettings";
 
 const { Text } = Typography;
 const SelectionMismatchContext = createContext(false);
@@ -85,6 +85,7 @@ const batchEditFields = [
 
 type BatchEditField = typeof batchEditFields[number][0];
 type BatchEditConfig = Partial<Record<BatchEditField, string>> & {
+  customTags?: CustomTag[];
   rating?: number;
   ratingModified: boolean;
   coverPath?: string;
@@ -900,6 +901,36 @@ function EditTagsPanel({ tracks, settings, task, submitting, onRun, onCancel }: 
   const [editView, setEditView] = useState("config");
   const [enabledFields, setEnabledFields] = useState<BatchEditField[]>([]);
   const [values, setValues] = useState<Record<BatchEditField, string>>(() => Object.fromEntries(batchEditFields.map(([key]) => [key, ""])) as Record<BatchEditField, string>);
+  const [customValues, setCustomValues] = useState<Record<string, string>>({});
+  const [customOriginals, setCustomOriginals] = useState<Record<string, CustomTag[]>>({});
+  const [customLoadFailed, setCustomLoadFailed] = useState(false);
+  const [loadingCustom, setLoadingCustom] = useState(false);
+  const [selectedCustomKey, setSelectedCustomKey] = useState<string>();
+  const customTrackPaths = tracks.map(track => track.path).join("\u0000");
+  const hasCustomFields = settings.editCustomTags.length > 0;
+  useEffect(() => {
+    let active = true;
+    setCustomOriginals({});
+    setCustomLoadFailed(false);
+    if (!hasCustomFields || !tracks.length) { setLoadingCustom(false); return; }
+    setLoadingCustom(true);
+    const load = async () => {
+      const result: Record<string, CustomTag[]> = {};
+      let failed = false;
+      // Bound file reads instead of opening the entire selection concurrently.
+      for (let offset = 0; offset < tracks.length && active; offset += 4) {
+        const chunk = await Promise.allSettled(tracks.slice(offset, offset + 4).map(async track => [track.path, await loadCustomTags(track.path)] as const));
+        for (const item of chunk) {
+          if (item.status === "fulfilled") result[item.value[0]] = item.value[1];
+          else failed = true;
+        }
+      }
+      if (active) { setCustomOriginals(result); setCustomLoadFailed(failed); setLoadingCustom(false); }
+    };
+    void load();
+    return () => { active = false; };
+  }, [customTrackPaths, hasCustomFields]);
+  const customValueFor = (path: string, key: string) => customOriginals[path]?.find(tag => normalizeCustomTagKey(tag.key) === key)?.values.join("\n") ?? "";
   const [ratingModified, setRatingModified] = useState(false);
   const [rating, setRating] = useState(0);
   const [coverPath, setCoverPath] = useState<string>();
@@ -908,14 +939,19 @@ function EditTagsPanel({ tracks, settings, task, submitting, onRun, onCancel }: 
   const [lyricsOffsetMs, setLyricsOffsetMs] = useState(0);
   const [concurrency, setConcurrency] = useState(3);
   const [selectedValueField, setSelectedValueField] = useState<BatchEditField>();
-  const visibleFields = normalizeEditFieldOrder(settings.editFieldOrder).flatMap(key => {
+  const orderedFields = normalizeEditFieldOrder(settings.editFieldOrder, settings.editCustomTags).filter(key => settings.editFieldVisibility[key] !== false);
+  const customChanges = orderedFields.flatMap(code => {
+    const key = customTagKeyOf(code);
+    return key && customValues[key] !== undefined && customValues[key] !== "<keep>" ? [{ key, values: customValues[key].split(/\r?\n/) }] : [];
+  });
+  const visibleFields = orderedFields.flatMap(key => {
     const definition = batchEditFields.find(([field]) => field === key);
     return definition && settings.editFieldVisibility[key] !== false ? [definition] : [];
   });
   const visibleEnabledFields = enabledFields.filter(field => visibleFields.some(([key]) => key === field));
   useEffect(() => { if (isActiveTask(task)) setEditView("preview"); }, [task?.taskId, task?.status]);
   const enabledSet = useMemo(() => new Set(enabledFields), [enabledFields]);
-  const hasOperation = visibleEnabledFields.length > 0 || (settings.editFieldVisibility.rating !== false && ratingModified) || Boolean(coverPath) || removeCover || lyricsOffsetMs !== 0;
+  const hasOperation = customChanges.length > 0 || visibleEnabledFields.length > 0 || (settings.editFieldVisibility.rating !== false && ratingModified) || Boolean(coverPath) || removeCover || lyricsOffsetMs !== 0;
 
   async function chooseBatchCover() {
     const [selected] = await pickPaths({
@@ -935,6 +971,7 @@ function EditTagsPanel({ tracks, settings, task, submitting, onRun, onCancel }: 
 
   function run() {
     const config: BatchEditConfig = {
+      customTags: customChanges,
       rating: settings.editFieldVisibility.rating !== false && ratingModified && rating > 0 ? rating : undefined,
       ratingModified: settings.editFieldVisibility.rating !== false && ratingModified,
       coverPath,
@@ -981,6 +1018,7 @@ function EditTagsPanel({ tracks, settings, task, submitting, onRun, onCancel }: 
           const oldValue = previewTagValue(track[field]);
           return `${t(definition?.[1] ?? field)}: ${oldValue} → ${previewTagValue(values[field])}`;
         });
+        for (const tag of customChanges) previews.push(`${tag.key}: ${loadingCustom ? "…" : customOriginals[track.path] ? previewTagValue(customValueFor(track.path, tag.key)) : t("common.operationFailed")} → ${previewTagValue(tag.values.join("\n"))}`);
         if (ratingModified) previews.push(`${t("details.rating")}: ${track.rating ?? "∅"} → ${rating || "∅"}`);
         if (lyricsOffsetMs) previews.push(`${t("tasks.lyricsOffset")}: ${lyricsOffsetMs > 0 ? "+" : ""}${lyricsOffsetMs} ms`);
         if (coverPath || removeCover) previews.push(t(removeCover ? "tasks.removeCoverPreview" : "tasks.replaceCoverPreview"));
@@ -1000,14 +1038,30 @@ function EditTagsPanel({ tracks, settings, task, submitting, onRun, onCancel }: 
         <Space wrap>
           <Segmented aria-label={t("tasks.editView")} value={editView} onChange={setEditView} options={[{ value: "config", label: t("tasks.editConfig") }, { value: "preview", label: t("tasks.editPreview") }]} />
           <Select value={concurrency} onChange={setConcurrency} style={{ width: 130 }} options={[1, 2, 3, 4, 5].map((value) => ({ value, label: t("tasks.concurrency", { count: value }) }))} />
-          <Tag color={hasOperation ? "processing" : "default"}>{t("tasks.changeCount", { count: visibleEnabledFields.length + Number(ratingModified) + Number(Boolean(coverPath) || removeCover) + Number(lyricsOffsetMs !== 0) })}</Tag>
+          <Tag color={hasOperation ? "processing" : "default"}>{t("tasks.changeCount", { count: customChanges.length + visibleEnabledFields.length + Number(ratingModified) + Number(Boolean(coverPath) || removeCover) + Number(lyricsOffsetMs !== 0) })}</Tag>
         </Space>
       </div>
       <div className={`batch-edit-config${editView !== "config" ? " is-hidden" : ""}`}>
         <fieldset disabled={isActiveTask(task)} className="batch-edit-form">
         <Space orientation="vertical" size={12} className="full-width batch-edit-fields">
           <Text type="secondary">{t("tasks.editEmptyHint")}</Text>
-          {visibleFields.map(([field, label, inputType]) => (
+          {orderedFields.map(code => {
+            const customKey = customTagKeyOf(code);
+            if (customKey) {
+              const value = customValues[customKey] ?? "<keep>";
+              return <div className="batch-edit-field" key={code}>
+                <label htmlFor={`batch-edit-${code}`} className={value !== "<keep>" ? "batch-field-modified" : undefined}>{customKey}{value !== "<keep>" ? t(value === "" ? "tasks.fieldWillClear" : "tasks.fieldModified") : ""}</label>
+                <div className="batch-edit-input">
+                  <Input.TextArea id={`batch-edit-${code}`} value={value} autoSize={{ minRows: 1, maxRows: 4 }} onChange={event => setCustomValues(current => ({ ...current, [customKey]: event.target.value }))} />
+                  <Tooltip title={t("tasks.selectExistingValue")}><Button type="text" icon={<SwapOutlined />} disabled={loadingCustom} aria-label={t("tasks.selectNamedValue", { name: customKey })} onClick={() => setSelectedCustomKey(customKey)} /></Tooltip>
+                  <Tooltip title={t(value !== "<keep>" ? "tasks.keepField" : "tasks.clearField")}><Button type="text" icon={value !== "<keep>" ? <UndoOutlined /> : <CloseOutlined />} aria-label={t(value !== "<keep>" ? "tasks.restoreField" : "tasks.clearNamedField", { name: customKey })} onClick={() => setCustomValues(current => ({ ...current, [customKey]: value !== "<keep>" ? "<keep>" : "" }))} /></Tooltip>
+                </div>
+              </div>;
+            }
+            const definition = visibleFields.find(([field]) => field === code);
+            if (!definition) return null;
+            const [field, label, inputType] = definition;
+            return (
             <div className="batch-edit-field" key={field}>
               <label htmlFor={`batch-edit-${field}`} className={enabledSet.has(field) ? "batch-field-modified" : undefined}>{t(label)}{enabledSet.has(field) ? t(values[field] === "" ? "tasks.fieldWillClear" : "tasks.fieldModified") : ""}</label>
               <div className="batch-edit-input">
@@ -1020,7 +1074,7 @@ function EditTagsPanel({ tracks, settings, task, submitting, onRun, onCancel }: 
                 <Tooltip title={t("tasks.selectExistingValue")}><Button type="text" icon={<SwapOutlined />} aria-label={t("tasks.selectNamedValue", { name: t(label) })} onClick={() => setSelectedValueField(field)} /></Tooltip>
               </div>
             </div>
-          ))}
+          ); })}
           {settings.editFieldVisibility.rating !== false && <div className="batch-edit-field">
             <Text className={ratingModified ? "batch-field-modified" : undefined}>{t("details.rating")}{ratingModified ? t(rating === 0 ? "tasks.fieldWillClear" : "tasks.fieldModified") : ""}</Text>
             <Space><Rate disabled={isActiveTask(task)} allowClear value={ratingModified ? rating : 0} onChange={value => { setRatingModified(true); setRating(value); }} />{ratingModified ? <Button type="text" icon={<UndoOutlined />} onClick={() => { setRatingModified(false); setRating(0); }}>{t("cover.revert")}</Button> : <Tag>{"<keep>"}</Tag>}</Space>
@@ -1044,6 +1098,13 @@ function EditTagsPanel({ tracks, settings, task, submitting, onRun, onCancel }: 
         </Space>
         </fieldset>
       </div>
+      <Modal centered open={Boolean(selectedCustomKey)} zIndex={2200} title={t("tasks.selectExistingValue")} onCancel={() => setSelectedCustomKey(undefined)} footer={null} className="batch-value-modal">
+        <Space orientation="vertical" className="full-width">
+          {customLoadFailed ? <Text type="warning">{t("common.operationFailed")}</Text> : null}
+          {selectedCustomKey && [...new Set(tracks.map(track => customValueFor(track.path, selectedCustomKey)).filter(value => value.trim()))].map(value => <Button key={value} block onClick={() => { setCustomValues(current => ({ ...current, [selectedCustomKey!]: value })); setSelectedCustomKey(undefined); }}>{value}</Button>)}
+          {selectedCustomKey && !tracks.some(track => customValueFor(track.path, selectedCustomKey).trim()) ? <EmptyState description={t("tasks.noExistingValues")} /> : null}
+        </Space>
+      </Modal>
       <Modal open={Boolean(selectedValueField)} zIndex={2200} title={t("tasks.selectExistingValue")} onCancel={() => setSelectedValueField(undefined)} footer={null} className="batch-value-modal">
         <div className="batch-value-options">
           {selectedValues.length ? selectedValues.map(value => <Button key={value} block onClick={() => { if (selectedValueField) changeField(selectedValueField, value); setSelectedValueField(undefined); }}>{value}</Button>) : <EmptyState description={t("tasks.noExistingValues")} />}

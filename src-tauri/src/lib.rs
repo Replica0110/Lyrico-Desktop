@@ -94,6 +94,7 @@ pub fn run() {
             pick_save_path,
             read_audio_file,
             load_custom_tags,
+            commands::load_library_custom_tag_keys,
             read_image_file,
             read_text_file,
             write_text_file,

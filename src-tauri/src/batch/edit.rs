@@ -1,7 +1,7 @@
 use super::processor::{BatchProcessor, ProcessContext, ProcessError, ProcessOutcome};
 use crate::audio::{read_image_data_url, read_track, save_tag_fields, ArtworkMode};
 use crate::lyrics::{self, LyricsOptions};
-use crate::models::{AudioTrack, TagUpdate};
+use crate::models::{AudioTrack, CustomTag, TagUpdate};
 use serde::Deserialize;
 use serde_json::json;
 use std::path::Path;
@@ -10,6 +10,7 @@ use std::sync::atomic::Ordering;
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 struct EditTagsConfig {
+    custom_tags: Vec<CustomTag>,
     title: Option<String>,
     artist: Option<String>,
     album_artist: Option<String>,
@@ -58,7 +59,15 @@ impl BatchProcessor for EditTagsProcessor {
             .map(read_image_data_url)
             .transpose()
             .map_err(ProcessError::Failed)?;
-        let (update, changed_fields) = build_update(&current, &config, cover_data_url)?;
+        let (mut update, mut changed_fields) = build_update(&current, &config, cover_data_url)?;
+        if !config.custom_tags.is_empty() {
+            let existing = crate::audio::read_custom_tags(path).map_err(ProcessError::Failed)?;
+            let merged = merge_custom_tags(&existing, &config.custom_tags)?;
+            if merged != existing {
+                update.custom_tags = Some(merged);
+                changed_fields.push("customTags".to_string());
+            }
+        }
         if changed_fields.is_empty() {
             return Err(ProcessError::Skipped("No changes".to_string()));
         }
@@ -99,7 +108,8 @@ fn parse_config(config_json: Option<&str>) -> Result<EditTagsConfig, ProcessErro
 }
 
 fn has_operation(config: &EditTagsConfig) -> bool {
-    config.title.is_some()
+    !config.custom_tags.is_empty()
+        || config.title.is_some()
         || config.artist.is_some()
         || config.album_artist.is_some()
         || config.album.is_some()
@@ -122,6 +132,39 @@ fn has_operation(config: &EditTagsConfig) -> bool {
         || config.replay_gain_album_gain.is_some()
         || config.replay_gain_album_peak.is_some()
         || config.replay_gain_reference_loudness.is_some()
+}
+
+fn merge_custom_tags(
+    existing: &[CustomTag],
+    changes: &[CustomTag],
+) -> Result<Vec<CustomTag>, ProcessError> {
+    let mut merged = existing.to_vec();
+    let mut keys = std::collections::HashSet::new();
+    for tag in changes {
+        let key = crate::config::normalize_custom_tag_key(&tag.key)
+            .ok_or_else(|| ProcessError::Failed("Invalid custom tag key".to_string()))?;
+        if !keys.insert(key.clone()) {
+            return Err(ProcessError::Failed("Duplicate custom tag key".to_string()));
+        }
+        let values: Vec<_> = tag
+            .values
+            .iter()
+            .filter(|value| !value.is_empty())
+            .cloned()
+            .collect();
+        if merged
+            .iter()
+            .any(|tag| tag.key == key && tag.values == values)
+        {
+            continue;
+        }
+        merged
+            .retain(|tag| crate::config::normalize_custom_tag_key(&tag.key).as_ref() != Some(&key));
+        if !values.is_empty() {
+            merged.push(CustomTag { key, values });
+        }
+    }
+    Ok(merged)
 }
 
 fn build_update(
@@ -324,4 +367,52 @@ fn split_genre(value: &str) -> Vec<String> {
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
         .collect()
+}
+
+#[cfg(test)]
+mod custom_field_tests {
+    use super::*;
+
+    fn tag(key: &str, values: &[&str]) -> CustomTag {
+        CustomTag {
+            key: key.to_string(),
+            values: values.iter().map(|value| value.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn batch_custom_edits_preserve_unselected_tags_and_support_set_and_clear() {
+        let existing = vec![
+            tag("MOOD", &["calm"]),
+            tag("LABEL", &["one", "two"]),
+            tag("HIDDEN", &["keep"]),
+        ];
+        let merged = merge_custom_tags(
+            &existing,
+            &[
+                tag(" mood ", &["lively"]),
+                tag("LABEL", &[""]),
+                tag("NEW", &["a", "b"]),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            merged,
+            vec![
+                tag("HIDDEN", &["keep"]),
+                tag("MOOD", &["lively"]),
+                tag("NEW", &["a", "b"])
+            ]
+        );
+        assert_eq!(merge_custom_tags(&existing, &[]).unwrap(), existing);
+    }
+
+    #[test]
+    fn custom_only_tasks_are_operations_and_invalid_keys_fail() {
+        assert!(has_operation(
+            &parse_config(Some(r#"{"customTags":[{"key":"MOOD","values":["calm"]}]}"#)).unwrap()
+        ));
+        assert!(merge_custom_tags(&[], &[tag("a\nb", &["value"])]).is_err());
+        assert!(merge_custom_tags(&[], &[tag("mood", &["a"]), tag("MOOD", &["b"])]).is_err());
+    }
 }

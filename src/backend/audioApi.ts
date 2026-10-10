@@ -32,6 +32,10 @@ export async function loadCustomTags(path: string) {
   return invoke<CustomTag[]>("load_custom_tags", { path });
 }
 
+export async function loadLibraryCustomTagKeys() {
+  return invoke<{ keys: string[]; unreadable: number }>("load_library_custom_tag_keys");
+}
+
 export async function readImageFile(path: string) {
   return invoke<string>("read_image_file", { path });
 }
