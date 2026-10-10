@@ -315,6 +315,7 @@ npx --yes --package @playwright/cli playwright-cli --session layout run-code --f
 ## 12. 任务与反馈（2026-10-09）
 
 - 标题栏高度统一使用 `--titlebar-height`，Message 距窗口顶端为标题栏高度加 12px，不能覆盖窗口按钮。
+- 无边框窗口的自定义标题栏属于 WebView；Modal 的遮罩和点击层、Drawer 根节点统一从 `--titlebar-height` 下方开始，弹窗居中范围为剩余内容区域。打开弹层时仍须能拖动窗口、最小化、最大化/还原和关闭。参见 [Tauri 窗口自定义](https://v2.tauri.app/zh-cn/learn/window-customization/)。
 - 状态栏固定 30px；全局扫描、回放增益和批任务摘要只占状态栏，不在页头插入进度条。点击摘要显示上方悬浮详情，回放增益可取消，批任务可跳转到批处理页。任务出现、结束都不改变内容区域几何。
 - 短操作使用 Message；扫描及批任务完成使用右下角 Notification；部分失败/失败通知保留到手动关闭，并提供任务入口。相同终态事件只提醒一次。
 - 卸载插件、删除歌曲、移除目录、删除历史使用居中 Modal，明确取消与危险确认按钮。

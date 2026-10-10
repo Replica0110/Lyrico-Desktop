@@ -156,6 +156,15 @@ textarea {
   overflow: hidden;
 }
 
+/* Frameless Tauri windows keep their titlebar inside the webview. Portaled
+   overlays must reserve the same strip as the application content. */
+html .ant-modal-root .ant-modal-mask,
+html .ant-modal-root .ant-modal-wrap,
+html .ant-drawer {
+  top: var(--titlebar-height);
+  height: auto;
+}
+
 /* Title Bar */
 .titlebar {
   display: flex;
