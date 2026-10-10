@@ -56,6 +56,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_sharehub::init())
         .setup(|app| {
+            replay_gain::configure_resources(app.path().resource_dir()?);
             let paths = resolve_data_paths(&app.handle()).map_err(std::io::Error::other)?;
             if let Err(error) = logging::init(&paths.logs) {
                 eprintln!("Could not initialize file logging: {}", logging::redact(&error));

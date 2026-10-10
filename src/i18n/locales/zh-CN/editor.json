@@ -115,6 +115,8 @@
     "selectSongs": "请先选择一首或多首歌曲",
     "saved": "标签已保存",
     "replayGainCalculated": "已填入增益和峰值",
+    "replayGainPartialAudio": "已填入增益和峰值，音频完整性校验通过",
+    "replayGainPartialAudioDetail": "解码时检测到异常数据，已解码全部 {{decoded}} 个采样并通过 PCM MD5 校验",
     "lyricsImported": "歌词已导入编辑器",
     "lyricsExported": "歌词已导出",
     "coverExported": "封面已导出",

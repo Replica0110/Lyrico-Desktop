@@ -98,10 +98,14 @@ export type ReplayGainAnalysis = {
   path: string;
   loudnessLufs: number;
   sampleCount: number;
+  /** Frames the container declares, when it declares a length. */
+  declaredSamples?: number | null;
   peak: number;
   trackGain: string;
   trackPeak: string;
   referenceLoudness: string;
+  /** Set when decoder anomalies passed complete FLAC sample count and PCM MD5 verification. */
+  warning?: string | null;
 };
 
 export type ReplayGainProgress = {

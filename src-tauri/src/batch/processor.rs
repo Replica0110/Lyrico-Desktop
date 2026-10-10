@@ -113,6 +113,8 @@ impl BatchProcessor for ReplayGainProcessor {
         if context.cancelled.load(Ordering::Relaxed) {
             return Err(ProcessError::Cancelled("Batch item cancelled".to_string()));
         }
+        // Verified decoder anomalies are surfaced; incomplete audio fails before tag writing.
+        let warnings: Vec<String> = analysis.warning.clone().into_iter().collect();
         let updated = write_replay_gain_tags(
             path,
             context.artist_separator,
@@ -128,7 +130,7 @@ impl BatchProcessor for ReplayGainProcessor {
                 path: context.item.song_path.clone(),
                 percent: 100,
                 status: "completed".to_string(),
-                message: None,
+                message: analysis.warning.clone(),
             },
         );
         Ok(ProcessOutcome {
@@ -140,6 +142,9 @@ impl BatchProcessor for ReplayGainProcessor {
                     "loudnessLufs": analysis.loudness_lufs,
                     "peak": analysis.peak,
                     "peakMode": peak_mode,
+                    "decodedSamples": analysis.sample_count,
+                    "declaredSamples": analysis.declared_samples,
+                    "warnings": warnings,
                 })
                 .to_string(),
             ),

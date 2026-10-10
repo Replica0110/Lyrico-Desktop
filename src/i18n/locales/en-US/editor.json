@@ -115,6 +115,8 @@
     "selectSongs": "Select one or more songs first",
     "saved": "Tags saved",
     "replayGainCalculated": "Gain and peak values were added",
+    "replayGainPartialAudio": "Gain and peak values were added; audio integrity verified",
+    "replayGainPartialAudioDetail": "The decoder reported anomalous data. All {{decoded}} samples were decoded and the PCM MD5 checksum was verified",
     "lyricsImported": "Lyrics were imported into the editor",
     "lyricsExported": "Lyrics were exported",
     "coverExported": "Cover was exported",
