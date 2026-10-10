@@ -11,6 +11,7 @@ import { TrackArtwork } from "../components/TrackArtwork";
 import type { AlbumGroup } from "../domain/library";
 import { albumSortFields, sortAlbumsBy, type AlbumSortField, type SortState } from "../domain/sort";
 import { formatDuration } from "../utils/format";
+import { useGoUpOnMouseBack } from "../hooks/useGoUpOnMouseBack";
 import { useIncrementalGrid } from "../hooks/useIncrementalGrid";
 
 const { Text } = Typography;
@@ -55,6 +56,7 @@ export const AlbumsPage = memo(function AlbumsPage({
   const sortedAlbums = useMemo(() => (sort ? sortAlbumsBy(albums, sort.key, sort.direction) : albums), [albums, sort]);
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumId);
   const { visibleCount, sentinelRef, hasMore } = useIncrementalGrid(sortedAlbums.length);
+  useGoUpOnMouseBack(detailsOpen && selectedAlbum !== undefined, onCloseDetails);
 
   if (detailsOpen && selectedAlbum) {
     return (

@@ -10,6 +10,7 @@ import { TrackArtwork } from "../components/TrackArtwork";
 import type { ArtistGroup } from "../domain/library";
 import { artistSortFields, sortArtistsBy, type ArtistSortField, type SortState } from "../domain/sort";
 import { formatDuration } from "../utils/format";
+import { useGoUpOnMouseBack } from "../hooks/useGoUpOnMouseBack";
 import { useIncrementalGrid } from "../hooks/useIncrementalGrid";
 
 const { Text } = Typography;
@@ -56,6 +57,7 @@ export const ArtistsPage = memo(function ArtistsPage({
   const sortedArtists = useMemo(() => (sort ? sortArtistsBy(artists, sort.key, sort.direction) : artists), [artists, sort]);
   const selectedArtist = artists.find((artist) => artist.id === selectedArtistId);
   const { visibleCount, sentinelRef, hasMore } = useIncrementalGrid(sortedArtists.length);
+  useGoUpOnMouseBack(detailsOpen && selectedArtist !== undefined, onCloseDetails);
 
   if (detailsOpen && selectedArtist) {
     return (

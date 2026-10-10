@@ -19,6 +19,7 @@ import { SubPageBar } from "../components/SubPageBar";
 import { buildLibraryFolderTree, filterTracks, tracksInDirectory, type LibraryFolderNode } from "../domain/library";
 import { folderSortFields, sortFoldersBy, type FolderSortField, type SortState } from "../domain/sort";
 import "./FoldersPage.css";
+import { useGoUpOnMouseBack } from "../hooks/useGoUpOnMouseBack";
 import { formatTimeValue } from "../utils/format";
 
 /**
@@ -90,6 +91,13 @@ export const FoldersPage = memo(function FoldersPage({
       setQuery("");
     }
   }, [currentKey, current]);
+
+  useGoUpOnMouseBack(Boolean(current), () => {
+    if (!current) return;
+    const parent = current.parentKey ? nodes.get(current.parentKey) : undefined;
+    if (parent) openFolder(parent);
+    else openRoot();
+  });
 
   function openFolder(node: LibraryFolderNode) {
     setCurrentKey(node.key);

@@ -39,6 +39,7 @@ import {
   pickSavePath,
   uninstallSourcePlugin,
 } from "../backend/audioApi";
+import { useBlockMouseSideButtons } from "../hooks/useGoUpOnMouseBack";
 import { useLibrarySelection } from "../hooks/useLibrarySelection";
 import { AppErrorBoundary } from "../components/AppErrorBoundary";
 import { reportFrontendError } from "../backend/diagnostics";
@@ -213,6 +214,7 @@ function LyricoDesktop() {
   const pluginMutationInFlight = useRef(false);
   const [pluginMutationBusy, setPluginMutationBusy] = useState(false);
   const { t, i18n } = useTranslation();
+  useBlockMouseSideButtons();
   const [activeView, setActiveView] = useState<ViewKey>("songs");
   const [tracks, setTracks] = useState<AudioTrack[]>([]);
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
