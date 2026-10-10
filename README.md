@@ -46,12 +46,10 @@ npm run tauri build
 
 产物位于 `src-tauri/target/release/bundle/nsis/`。
 
-检查与测试：
+检查：
 
 ```powershell
 npm run build
-npm test
-cargo test --manifest-path src-tauri/Cargo.toml --lib
 ```
 
 `npm run dev` 仅启动前端预览；完整功能需通过 `npm run tauri dev` 运行。

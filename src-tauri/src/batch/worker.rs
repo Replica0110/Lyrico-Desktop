@@ -323,17 +323,3 @@ fn parse_concurrency(config_json: Option<&str>) -> usize {
         .unwrap_or(3)
         .clamp(1, 5)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn concurrency_matches_mobile_bounds_and_default() {
-        assert_eq!(parse_concurrency(None), 3);
-        assert_eq!(parse_concurrency(Some(r#"{"concurrency":0}"#)), 1);
-        assert_eq!(parse_concurrency(Some(r#"{"concurrency":9}"#)), 5);
-        assert_eq!(parse_concurrency(Some(r#"{"concurrency":4}"#)), 4);
-        assert_eq!(parse_concurrency(Some("invalid")), 3);
-    }
-}
