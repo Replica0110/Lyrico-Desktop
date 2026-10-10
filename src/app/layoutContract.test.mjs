@@ -29,6 +29,17 @@ const pageFiles = {
 
 /** Changelog: docs/ui-layout.md section 10.1. These assertions are the design contract. */
 describe("utility layout contract", () => {
+  it("keeps batch lists continuous and progress in a stable footer", () => {
+    const batchTable = read("../components/BatchTable.tsx");
+    expect(batchTable).toContain("virtual pagination={false}");
+    expect(batchTable).toContain("new ResizeObserver");
+    expect(tasks).not.toContain("pageSize:");
+    expect(tasks).toContain("<ProgressBar");
+    expect(tasks).not.toContain("<Progress ");
+    expect(tasks).toContain("tracksForTask");
+    expect(tasks).toContain("SelectionMismatchContext");
+    expect(css).toMatch(/\.batch-panel-footer \{[^}]*height: 64px/);
+  });
   it("keeps one source for shell and page dimensions", () => {
     for (const token of [
       "--nav-width",

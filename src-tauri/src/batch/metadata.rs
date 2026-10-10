@@ -43,6 +43,8 @@ const DEFAULT_TARGETS: &[&str] = &[
 #[serde(rename_all = "camelCase")]
 struct MatchConfig {
     #[serde(default)]
+    match_mode: String,
+    #[serde(default)]
     target_modes: HashMap<String, String>,
     #[serde(default)]
     enabled_source_order_ids: Vec<String>,
@@ -114,7 +116,11 @@ impl BatchProcessor for MatchMetadataProcessor {
             None,
         ))
         .map_err(ProcessError::Failed)?;
-        let plugins = ordered_search_plugins(plugins, &config.enabled_source_order_ids);
+        let plugins = ordered_search_plugins(
+            plugins,
+            &config.enabled_source_order_ids,
+            match_source_kind(&config.match_mode),
+        );
         if plugins.is_empty() {
             return Err(ProcessError::Skipped(
                 "No enabled metadata source".to_string(),
@@ -311,16 +317,25 @@ fn parse_config(raw: Option<&str>) -> Result<MatchConfig, ProcessError> {
     Ok(config)
 }
 
+fn match_source_kind(mode: &str) -> &'static str {
+    match mode {
+        "lyrics" => "lyrics",
+        "cover" => "covers",
+        _ => "metadata",
+    }
+}
+
 fn ordered_search_plugins(
     plugins: Vec<SourcePlugin>,
     enabled_order: &[String],
+    source_kind: &str,
 ) -> Vec<SourcePlugin> {
     let mut plugins: Vec<_> = plugins
         .into_iter()
         .filter(|plugin| {
             plugin.enabled
                 && plugin
-                    .source_state("metadata")
+                    .source_state(source_kind)
                     .is_some_and(|state| state.enabled)
                 && (enabled_order.is_empty()
                     || enabled_order.iter().any(|id| id == &plugin.manifest.id))
@@ -338,7 +353,7 @@ fn ordered_search_plugins(
             .position(|id| id == &plugin.manifest.id)
             .unwrap_or(usize::MAX);
         let priority = plugin
-            .source_state("metadata")
+            .source_state(source_kind)
             .map_or(i32::MAX, |state| state.priority);
         (configured, priority)
     });
@@ -928,6 +943,87 @@ fn numeric_field(
 mod tests {
     use super::*;
 
+    #[test]
+    fn match_sources_follow_category_enable_state_and_priority() {
+        use crate::plugins::manifest::{PluginManifest, PluginSourceState};
+        use std::collections::BTreeMap;
+        fn plugin(id: &str, metadata: bool, priority: i32, search_songs: bool) -> SourcePlugin {
+            let manifest: PluginManifest = serde_json::from_value(json!({
+                "id": id, "name": id, "versionCode": 1, "versionName": "1", "author": "test",
+                "description": "test", "apiVersion": 5,
+                "capabilities": if search_songs { vec!["searchSongs"] } else { vec!["searchCovers"] },
+            })).unwrap();
+            SourcePlugin {
+                manifest,
+                plugin_dir: String::new(),
+                icon_path: None,
+                icon_data_url: None,
+                enabled: true,
+                sort_order: 0,
+                installed_at: String::new(),
+                updated_at: String::new(),
+                config: json!({}),
+                source_states: BTreeMap::from([
+                    (
+                        "metadata".into(),
+                        PluginSourceState {
+                            enabled: metadata,
+                            priority: 0,
+                        },
+                    ),
+                    (
+                        "lyrics".into(),
+                        PluginSourceState {
+                            enabled: true,
+                            priority,
+                        },
+                    ),
+                    (
+                        "covers".into(),
+                        PluginSourceState {
+                            enabled: true,
+                            priority,
+                        },
+                    ),
+                ]),
+            }
+        }
+        let plugins = vec![
+            plugin("a", false, 2, true),
+            plugin("b", true, 1, true),
+            plugin("cover-only", false, 0, false),
+        ];
+        let ids = |sources: Vec<SourcePlugin>| {
+            sources
+                .into_iter()
+                .map(|plugin| plugin.manifest.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            ids(ordered_search_plugins(plugins.clone(), &[], "metadata")),
+            vec!["b"]
+        );
+        assert_eq!(
+            ids(ordered_search_plugins(plugins.clone(), &[], "lyrics")),
+            vec!["b", "a"]
+        );
+        assert_eq!(
+            ids(ordered_search_plugins(
+                plugins.clone(),
+                &["a".into(), "b".into()],
+                "covers"
+            )),
+            vec!["a", "b"]
+        );
+        assert_eq!(
+            ids(ordered_search_plugins(plugins, &["a".into()], "lyrics")),
+            vec!["a"]
+        );
+        assert_eq!(match_source_kind(""), "metadata");
+        assert_eq!(match_source_kind("lyrics"), "lyrics");
+        assert_eq!(match_source_kind("cover"), "covers");
+    }
+
     fn track() -> AudioTrack {
         AudioTrack {
             id: "song".to_string(),
@@ -996,6 +1092,7 @@ mod tests {
             ("track_number".to_string(), "3/12".to_string()),
         ]);
         let config = MatchConfig {
+            match_mode: String::new(),
             target_modes: HashMap::from([
                 ("title".to_string(), "supplement".to_string()),
                 ("album".to_string(), "supplement".to_string()),

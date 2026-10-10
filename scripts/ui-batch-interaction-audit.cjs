@@ -1,0 +1,60 @@
+async (page) => {
+  const assert=(v,m)=>{if(!v)throw Error(m);};
+  await page.evaluate(()=>window.name='');
+  await page.reload();
+  await page.setViewportSize({width:720,height:520});
+  await page.getByRole('checkbox',{name:'全选',exact:true}).check();
+  await page.getByRole('button',{name:'批处理',exact:true}).click();
+  async function operation(label){for(const button of await page.locator('.ant-notification').getByRole('button',{name:'Close',exact:true}).all())await button.click();await page.waitForTimeout(350);await page.locator('.batch-operation-select').click();await page.locator('.ant-select-dropdown:visible').getByTitle(label,{exact:true}).click();}
+  await operation('编辑标签');
+  const title=page.locator('#batch-edit-title');
+  assert(await title.inputValue()==='<keep>','Keep is not the actual value');
+  await page.getByRole('button',{name:'清空 标题',exact:true}).count().then(async n=>{if(n)await page.getByRole('button',{name:'清空 标题',exact:true}).click();else await title.locator('..').getByRole('button').first().click();});
+  assert(await title.inputValue()==='','Clear did not produce empty value');
+  assert(await title.locator('../..').innerText().then(t=>t.includes('将清空')),'Clear marker missing');
+  await title.locator('..').getByRole('button').first().click();
+  assert(await title.inputValue()==='<keep>','Undo did not restore keep');
+  await title.fill('统一标题');
+  assert(await title.locator('../..').innerText().then(t=>t.includes('已修改')),'Modified marker missing');
+  await title.fill('<keep>');
+  assert(!await title.locator('../..').innerText().then(t=>t.includes('已修改')),'Literal keep still changes tags');
+  await page.getByRole('button',{name:'从已选歌曲中选择艺术家',exact:true}).click();
+  await page.locator('.batch-value-modal').getByRole('button',{name:/^本\s*兮$/}).click();
+  assert(await page.locator('#batch-edit-artist').inputValue()==='本兮','Existing value not applied');
+  await title.locator('..').getByRole('button').first().click();
+  const scrolls=await page.locator('#batch-edit-title').evaluate(el=>{let count=0;for(let p=el.parentElement;p;p=p.parentElement){const style=getComputedStyle(p);if(/auto|scroll/.test(style.overflowY)&&p.scrollHeight>p.clientHeight+1)count++;}return count;});
+  assert(scrolls===1,'Nested vertical scroll: '+scrolls);
+  await page.screenshot({path:'output/playwright/batch-edit-modified-720.png'});
+  await page.locator('.batch-panel-footer').getByRole('button').click();
+  await page.waitForTimeout(300);
+  const edit=await page.evaluate(()=>window.__uiTest.calls.find(c=>c.cmd==='create_batch_task'));
+  const config=JSON.parse(edit.args.configJson);
+  assert(config.title===''&&config.artist==='本兮'&&!Object.hasOwn(config,'album'),'Keep/clear/edit payload incorrect');
+  await page.getByText('配置',{exact:true}).click();
+  assert(await page.locator('.ant-rate-disabled').count()===1,'Rating still enabled while running');
+  await page.locator('.batch-panel-toolbar').getByText('变更预览',{exact:true}).click();
+  await page.locator('.batch-panel-footer').getByRole('button').click();
+  await operation('匹配歌词');
+  assert(await page.getByRole('switch',{name:'覆盖已有歌词',exact:true}).count()===1,'Lyrics overwrite control missing');
+  assert(await page.getByRole('button',{name:'匹配字段',exact:true}).count()===0,'Unrelated fields remain');
+  await page.getByRole('switch',{name:'覆盖已有歌词',exact:true}).check();
+  await page.locator('.batch-panel-footer').getByRole('button').click();
+  const matching=await page.evaluate(()=>window.__uiTest.calls.filter(c=>c.cmd==='create_batch_task').at(-1));
+  const match=JSON.parse(matching.args.configJson);
+  assert(match.matchMode==='lyrics' && match.targetModes.lyrics==='overwrite' && Object.entries(match.targetModes).every(([key,value])=>key==='lyrics'||value==='disabled'),'Overwrite affects unrelated fields');
+  await page.locator('.batch-panel-footer').getByRole('button').click();
+  await operation('匹配封面');
+  assert(await page.getByRole('switch',{name:'覆盖已有封面',exact:true}).count()===1,'Cover overwrite control missing');
+  await operation('删除歌曲');
+  assert(await page.locator('.batch-panel-footer').innerText().then(t=>t.includes('无法撤销')),'Delete warning outside footer');
+  await page.screenshot({path:'output/playwright/batch-delete-footer-720.png'});
+  await page.evaluate(()=>window.name='english');
+  await page.reload();
+  await page.getByRole('button',{name:'Batch',exact:true}).click();
+  assert(!await page.locator('.tasks-view').innerText().then(t=>/tasks\.|common\.|exportLyrics|succeeded/.test(t)),'Raw locale keys');
+  await page.screenshot({path:'output/playwright/batch-english-empty-720.png'});
+  await page.evaluate(()=>window.name='');
+  return {keepClearUndo:true,existingValues:true,modifiedLabels:true,singleScroll:true,payloadSemantics:true,ratingDisabled:true,targetOnlyOverwrite:true,deleteWarning:true,english:true};
+}
+
+

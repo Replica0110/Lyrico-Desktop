@@ -33,6 +33,7 @@ struct EditTagsConfig {
     replay_gain_track_peak: Option<String>,
     replay_gain_album_gain: Option<String>,
     replay_gain_album_peak: Option<String>,
+    replay_gain_reference_loudness: Option<String>,
 }
 
 pub(super) struct EditTagsProcessor;
@@ -120,6 +121,7 @@ fn has_operation(config: &EditTagsConfig) -> bool {
         || config.replay_gain_track_peak.is_some()
         || config.replay_gain_album_gain.is_some()
         || config.replay_gain_album_peak.is_some()
+        || config.replay_gain_reference_loudness.is_some()
 }
 
 fn build_update(
@@ -186,6 +188,12 @@ fn build_update(
         &current.replay_gain_album_peak,
         &config.replay_gain_album_peak,
         "replayGainAlbumPeak",
+        &mut changed,
+    );
+    let replay_gain_reference_loudness = edit_string(
+        &current.replay_gain_reference_loudness,
+        &config.replay_gain_reference_loudness,
+        "replayGainReferenceLoudness",
         &mut changed,
     );
     let current_genre = split_genre(&current.genre);
@@ -263,7 +271,7 @@ fn build_update(
             replay_gain_track_peak,
             replay_gain_album_gain,
             replay_gain_album_peak,
-            replay_gain_reference_loudness: current.replay_gain_reference_loudness.clone(),
+            replay_gain_reference_loudness,
             cover_data_url,
             remove_cover,
         },
@@ -349,6 +357,25 @@ mod tests {
         assert_eq!(update.comment, "");
         assert_eq!(update.lyrics, "[00:01.500]line");
         assert_eq!(changed, ["artist", "comment", "lyricsOffset"]);
+    }
+
+    #[test]
+    fn reference_loudness_can_be_changed_and_cleared_without_changing_other_gain_tags() {
+        let mut current = sample_track();
+        current.replay_gain_reference_loudness = "-18 LUFS".to_string();
+        for value in ["-16 LUFS", ""] {
+            let config = parse_config(Some(
+                &json!({ "replayGainReferenceLoudness": value }).to_string(),
+            ))
+            .unwrap();
+            let (update, changed) = build_update(&current, &config, None).unwrap();
+            assert_eq!(update.replay_gain_reference_loudness, value);
+            assert_eq!(
+                update.replay_gain_track_gain,
+                current.replay_gain_track_gain
+            );
+            assert_eq!(changed, ["replayGainReferenceLoudness"]);
+        }
     }
 
     #[test]

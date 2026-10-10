@@ -38,7 +38,8 @@
     "reloadApp": "Reload app",
     "reorderItem": "Reorder {{name}}",
     "reorderHint": "Drag to reorder; focus and press Space to pick up, arrow keys to move, Space to drop",
-    "reorderPosition": "{{name}}, position {{position}} of {{total}}"
+    "reorderPosition": "{{name}}, position {{position}} of {{total}}",
+    "delete": "Delete"
   },
   "nav": {
     "library": "Library",

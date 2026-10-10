@@ -33,7 +33,8 @@
     "reloadApp": "重新加载应用",
     "reorderItem": "拖动排序：{{name}}",
     "reorderHint": "拖动调整顺序；聚焦后按空格拾起，方向键移动，再按空格落下",
-    "reorderPosition": "{{name}}，第 {{position}} 项，共 {{total}} 项"
+    "reorderPosition": "{{name}}，第 {{position}} 项，共 {{total}} 项",
+    "delete": "删除"
   },
   "nav": {
     "library": "音乐库",
