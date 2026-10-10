@@ -33,7 +33,13 @@ pub(crate) fn write_copy<T>(
     operation: impl FnOnce(&Path) -> Result<T, String>,
 ) -> Result<T, String> {
     static NEXT: AtomicU64 = AtomicU64::new(1);
-    with_file_lock(path, || {
+    let diagnostic = crate::logging::Operation::new(
+        "files",
+        "write_copy",
+        serde_json::json!({"path":path.to_string_lossy()}),
+        log::Level::Debug,
+    );
+    let result = with_file_lock(path, || {
         let metadata = std::fs::metadata(path).map_err(|error| error.to_string())?;
         if metadata.permissions().readonly() {
             return Err("Audio file is read-only".into());
@@ -77,7 +83,9 @@ pub(crate) fn write_copy<T>(
         std::fs::rename(&temp, &canonical)
             .map_err(|error| format!("Could not replace audio file: {error}"))?;
         Ok(result)
-    })
+    });
+    diagnostic.finish(&result);
+    result
 }
 struct TemporaryFile(PathBuf);
 impl Drop for TemporaryFile {

@@ -255,10 +255,24 @@ fn normalize_edit_field_order(order: Vec<String>) -> Vec<String> {
     let mut normalized = Vec::new();
     for value in order.into_iter().chain(default_edit_field_order()) {
         let expanded: Vec<&str> = match value.as_str() {
-            "basic" => vec!["title", "artist", "albumArtist", "album", "year", "language", "genre"],
+            "basic" => vec![
+                "title",
+                "artist",
+                "albumArtist",
+                "album",
+                "year",
+                "language",
+                "genre",
+            ],
             "track" => vec!["trackNumber", "discNumber"],
             "credits" => vec!["composer", "lyricist", "copyright", "comment"],
-            "replaygain" => vec!["replayGainTrackGain", "replayGainTrackPeak", "replayGainAlbumGain", "replayGainAlbumPeak", "replayGainReferenceLoudness"],
+            "replaygain" => vec![
+                "replayGainTrackGain",
+                "replayGainTrackPeak",
+                "replayGainAlbumGain",
+                "replayGainAlbumPeak",
+                "replayGainReferenceLoudness",
+            ],
             "cover" => vec!["rating"],
             key => vec![key],
         };
@@ -369,6 +383,12 @@ fn load_config_from(path: &Path) -> Result<AppConfig, String> {
     let backup = path.with_extension("json.bak");
     if !path.exists() {
         if backup.exists() {
+            crate::logging::event(
+                log::Level::Warn,
+                "config",
+                "backup.recovery",
+                serde_json::json!({"reason":"primary configuration missing"}),
+            );
             return parse_config_file(&backup).map_err(|error| {
                 format!(
                     "Application configuration at {} is missing and the backup at {} could not be read: {error}",
@@ -383,6 +403,12 @@ fn load_config_from(path: &Path) -> Result<AppConfig, String> {
         if !backup.exists() {
             return Err(error);
         }
+        crate::logging::event(
+            log::Level::Warn,
+            "config",
+            "backup.recovery",
+            serde_json::json!({"error":error}),
+        );
         parse_config_file(&backup).map_err(|_| error)
     })
 }

@@ -32,6 +32,66 @@ pub(crate) fn invoke(
     request: Value,
     locale: Option<&str>,
 ) -> Result<Value, String> {
+    let operation = crate::logging::Operation::new(
+        "plugins",
+        "invoke",
+        json!({"pluginId":plugin.manifest.id,"version":plugin.manifest.version_name,"function":function_name,"page":request.get("page"),"pageSize":request.get("pageSize")}),
+        log::Level::Debug,
+    );
+    let result = invoke_inner(plugin, function_name, request, locale);
+    // Never persist arbitrary JS exceptions or host payloads; preserve the business result.
+    let diagnostic = result
+        .as_ref()
+        .map(|_| ())
+        .map_err(|error| plugin_error_summary(error));
+    if let Ok(value) = &result {
+        let count = value.as_array().map(Vec::len).or_else(|| {
+            ["items", "results", "songs", "data"]
+                .iter()
+                .find_map(|key| value.get(key)?.as_array().map(Vec::len))
+        });
+        crate::logging::event(
+            log::Level::Debug,
+            "plugins",
+            "response.summary",
+            json!({"pluginId":plugin.manifest.id,"function":function_name,"resultCount":count}),
+        );
+    }
+    operation.finish(&diagnostic);
+    result
+}
+
+fn plugin_error_summary(error: &str) -> String {
+    for kind in [
+        "TypeError",
+        "SyntaxError",
+        "ReferenceError",
+        "RangeError",
+        "InternalError",
+        "Error",
+    ] {
+        if error.contains(&format!("JavaScript {kind}:")) {
+            return format!("JavaScript {kind}; inspect plugin code and runtime limits");
+        }
+    }
+    if error.starts_with("Plugin is disabled") {
+        return "Plugin is disabled".into();
+    }
+    if error.starts_with("Unsupported plugin function:") {
+        return "Unsupported plugin function".into();
+    }
+    if error.starts_with("Could not read ") {
+        return "Cannot read plugin script".into();
+    }
+    "Plugin runtime failed; inspect preceding network or script diagnostics".into()
+}
+
+fn invoke_inner(
+    plugin: &SourcePlugin,
+    function_name: &str,
+    request: Value,
+    locale: Option<&str>,
+) -> Result<Value, String> {
     if !plugin.is_enabled_anywhere() {
         return Err("Plugin is disabled for every search type".to_string());
     }
@@ -164,7 +224,22 @@ pub(crate) fn compile_plugin(plugin: &SourcePlugin, locale: Option<&str>) -> Res
 fn format_js_error(ctx: &rquickjs::Ctx<'_>, error: rquickjs::Error) -> String {
     if ctx.has_exception() {
         let exception = ctx.catch();
-        format!("{error}: {exception:?}")
+        let kind = exception
+            .as_object()
+            .and_then(|object| object.get::<_, String>("name").ok())
+            .filter(|name| {
+                [
+                    "TypeError",
+                    "SyntaxError",
+                    "ReferenceError",
+                    "RangeError",
+                    "InternalError",
+                    "Error",
+                ]
+                .contains(&name.as_str())
+            })
+            .unwrap_or_else(|| "Error".into());
+        format!("JavaScript {kind}: {error}: {exception:?}")
     } else {
         error.to_string()
     }
@@ -224,7 +299,9 @@ impl HostApi {
             .ok()
             .and_then(|value| serde_json::from_str(&value).ok())
             .unwrap_or_default();
-        let preferences = locale.map(|value| vec![value.to_string()]).unwrap_or_default();
+        let preferences = locale
+            .map(|value| vec![value.to_string()])
+            .unwrap_or_default();
         let strings = if plugin.manifest.i18n.is_some() {
             crate::plugins::i18n::PluginStrings::load(
                 Path::new(&plugin.plugin_dir),
@@ -277,12 +354,16 @@ impl HostApi {
                 json!({"pluginApiVersion":PLUGIN_API_VERSION,"hostApiVersion":HOST_API_VERSION,"engine":"quickjs","engineVersion":null,"supportedHostApis":SUPPORTED_HOST_APIS}),
             ),
             "log.debug" | "log.warn" | "log.error" => {
-                eprintln!(
-                    "[plugin:{}][{}][{}] {}",
-                    self.plugin_id,
-                    name,
-                    string(&payload, "tag"),
-                    string(&payload, "message")
+                let level = match name {
+                    "log.error" => log::Level::Error,
+                    "log.warn" => log::Level::Warn,
+                    _ => log::Level::Debug,
+                };
+                crate::logging::event(
+                    level,
+                    "plugins",
+                    "host.diagnostic",
+                    json!({"pluginId":self.plugin_id,"messageOmitted":true}),
                 );
                 Ok(Value::String(String::new()))
             }
@@ -388,7 +469,7 @@ impl HostApi {
             "compression.inflateBase64ToText" => Ok(Value::String(inflate(&decode_standard(
                 &string(&payload, "base64"),
             )?)?)),
-            name if name.starts_with("http.") => http_call(name, &payload),
+            name if name.starts_with("http.") => http_call(&self.plugin_id, name, &payload),
             name if name.starts_with("xml.") => super::xml::call(name, &payload),
             _ => Err(format!("Unsupported host API: {name}")),
         }
@@ -437,7 +518,52 @@ impl HostApi {
     }
 }
 
-fn http_call(name: &str, payload: &Value) -> Result<Value, String> {
+fn http_call(plugin_id: &str, name: &str, payload: &Value) -> Result<Value, String> {
+    let started = Instant::now();
+    let result = http_call_inner(plugin_id, name, payload);
+    if result.is_err() {
+        crate::logging::event(
+            log::Level::Warn,
+            "network",
+            "http.failed",
+            json!({"pluginId":plugin_id,"host":reqwest::Url::parse(&string(payload,"url")).ok().and_then(|url| url.host_str().map(str::to_owned)),"method":if name.contains("post") {"POST"} else {"GET"},"elapsedMs":started.elapsed().as_millis(),"error":result.as_ref().err().map(|error| http_error_summary(error))}),
+        );
+    }
+    result
+}
+
+fn http_error_summary(error: &str) -> &'static str {
+    if error.starts_with("HTTP timeout:") {
+        "Request timed out"
+    } else if error.starts_with("HTTP connection:") {
+        "Cannot establish connection (DNS, TCP or TLS)"
+    } else if error.starts_with("HTTP redirect:") {
+        "Redirect limit or redirect policy failure"
+    } else if error.starts_with("HTTP response body:") {
+        "Cannot read response body"
+    } else if error.starts_with("HTTP request:") {
+        "Invalid or unsuccessful HTTP request"
+    } else {
+        "Cannot prepare request or decode response"
+    }
+}
+fn request_error(error: reqwest::Error, stage: &str) -> String {
+    let category = if error.is_timeout() {
+        "timeout"
+    } else if error.is_connect() {
+        "connection"
+    } else if error.is_redirect() {
+        "redirect"
+    } else if stage == "response body" {
+        "response body"
+    } else {
+        "request"
+    };
+    format!("HTTP {category}: {error}")
+}
+
+fn http_call_inner(plugin_id: &str, name: &str, payload: &Value) -> Result<Value, String> {
+    let started = Instant::now();
     let timeout = payload
         .get("readTimeoutMs")
         .and_then(Value::as_u64)
@@ -486,8 +612,20 @@ fn http_call(name: &str, payload: &Value) -> Result<Value, String> {
         client.get(url)
     };
     request = request.headers(headers);
-    let response = request.send().map_err(|error| error.to_string())?;
+    let response = request
+        .send()
+        .map_err(|error| request_error(error, "send"))?;
     let status = response.status();
+    crate::logging::event(
+        if status.is_client_error() || status.is_server_error() {
+            log::Level::Warn
+        } else {
+            log::Level::Debug
+        },
+        "network",
+        "http.response",
+        json!({"pluginId":plugin_id,"elapsedMs":started.elapsed().as_millis(),"host":response.url().host_str(),"status":status.as_u16(),"method":if name.contains("post") {"POST"} else {"GET"},"timeoutMs":timeout}),
+    );
     let response_headers = response
         .headers()
         .iter()
@@ -501,7 +639,9 @@ fn http_call(name: &str, payload: &Value) -> Result<Value, String> {
                 ));
             map
         });
-    let bytes = response.bytes().map_err(|error| error.to_string())?;
+    let bytes = response
+        .bytes()
+        .map_err(|error| request_error(error, "response body"))?;
     if name == "http.getText" || name == "http.postText" {
         return String::from_utf8(bytes.to_vec())
             .map(Value::String)
@@ -882,10 +1022,9 @@ mod tests {
             if !manifest_path.is_file() {
                 continue;
             }
-            let manifest: PluginManifest = serde_json::from_str(
-                &fs::read_to_string(&manifest_path).unwrap(),
-            )
-            .unwrap_or_else(|error| panic!("{}: {error}", dir.display()));
+            let manifest: PluginManifest =
+                serde_json::from_str(&fs::read_to_string(&manifest_path).unwrap())
+                    .unwrap_or_else(|error| panic!("{}: {error}", dir.display()));
             assert!(
                 (1..=PLUGIN_API_VERSION).contains(&manifest.api_version),
                 "{} api {}",
@@ -909,12 +1048,9 @@ mod tests {
             }
             crate::plugins::i18n::validate(&dir, &manifest)
                 .unwrap_or_else(|error| panic!("{}: {error}", manifest.id));
-            let localized = crate::plugins::i18n::localize_manifest(
-                &manifest,
-                &dir,
-                &["zh-CN".to_string()],
-            )
-            .unwrap_or_else(|error| panic!("{}: {error}", manifest.id));
+            let localized =
+                crate::plugins::i18n::localize_manifest(&manifest, &dir, &["zh-CN".to_string()])
+                    .unwrap_or_else(|error| panic!("{}: {error}", manifest.id));
             assert!(!localized.name.starts_with('@'), "{}", manifest.id);
             let source_states = enabled_source_states(&manifest.capabilities);
             let plugin = SourcePlugin {
@@ -933,7 +1069,10 @@ mod tests {
                 .unwrap_or_else(|error| panic!("{}: {error}", plugin.manifest.id));
             seen += 1;
         }
-        assert!(seen >= 7, "expected the Lyrico-Plugins packages, found {seen}");
+        assert!(
+            seen >= 7,
+            "expected the Lyrico-Plugins packages, found {seen}"
+        );
     }
 
     fn fixture_plugin(root: &Path, enabled: bool) -> SourcePlugin {

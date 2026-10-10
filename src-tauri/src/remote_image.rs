@@ -2,6 +2,18 @@
 const REMOTE_IMAGE_MAX_REDIRECTS: usize = 5;
 
 pub(crate) fn fetch(url: &str, max_size: Option<u32>) -> Result<String, String> {
+    let operation = crate::logging::Operation::new(
+        "network",
+        "artwork.fetch",
+        serde_json::json!({"host":reqwest::Url::parse(url).ok().and_then(|url|url.host_str().map(str::to_owned)),"maxSize":max_size}),
+        log::Level::Debug,
+    );
+    let result = fetch_inner(url, max_size);
+    operation.finish(&result);
+    result
+}
+
+fn fetch_inner(url: &str, max_size: Option<u32>) -> Result<String, String> {
     let mut current = reqwest::Url::parse(url).map_err(|error| error.to_string())?;
     for _ in 0..=REMOTE_IMAGE_MAX_REDIRECTS {
         if !matches!(current.scheme(), "http" | "https") {

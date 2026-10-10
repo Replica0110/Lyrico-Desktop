@@ -150,20 +150,35 @@ impl BatchManager {
         tauri::async_runtime::spawn(async move {
             match manager.database.recover_interrupted_batch_tasks().await {
                 Ok(task_ids) => {
+                    crate::logging::event(
+                        if task_ids.is_empty() {
+                            log::Level::Debug
+                        } else {
+                            log::Level::Info
+                        },
+                        "batch",
+                        "recovery.completed",
+                        serde_json::json!({"resumed":task_ids.len()}),
+                    );
                     for task_id in task_ids {
-                        let _ = manager.start_task(app.clone(), task_id).await;
+                        let result = manager.start_task(app.clone(), task_id.clone()).await;
+                        if let Err(error) = result {
+                            crate::logging::event(
+                                log::Level::Error,
+                                "batch",
+                                "recovery.resume_failed",
+                                serde_json::json!({"taskId":task_id,"error":error}),
+                            );
+                        }
                     }
                 }
                 Err(error) => {
-                    let _ = manager
-                        .database
-                        .log_batch_event(
-                            "error",
-                            "Failed to recover batch tasks",
-                            Some(error),
-                            "startup",
-                        )
-                        .await;
+                    crate::logging::event(
+                        log::Level::Error,
+                        "batch",
+                        "recovery.failed",
+                        serde_json::json!({"error":error}),
+                    );
                 }
             }
         });

@@ -73,7 +73,10 @@ describe("utility layout contract", () => {
         expect(match[1], `${name}: ${match[0]}`).toContain("<");
       }
     }
-    expect(settings).toContain("<EmptyState");
+    // Settings no longer contains a log table; diagnostics are saved to files.
+    expect(settings).not.toContain("loadAppLogs");
+    expect(settings).not.toContain("exportLogs");
+    expect(settings).toContain("openLogsDirectory");
     expect(tasks).toContain("<NoSelectedSongs />");
   });
 

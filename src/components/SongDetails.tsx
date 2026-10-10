@@ -172,7 +172,6 @@ type LyricsEntry = { kind: "lyrics"; pluginId: string; song: PluginSongResult; c
 type CoverEntry = { kind: "cover"; pluginId: string; result: PluginSongResult };
 type OnlineEntry = MatchEntry | LyricsEntry | CoverEntry;
 type OnlineMode = "match" | "lyrics" | "cover";
-type MatchMode = "overwrite" | "supplement";
 
 function OnlineMatch({ track, plugins, settings, form, onApplied }: { track: AudioTrack; plugins: SourcePlugin[]; settings: DesktopSettings; form: FormInstance<TagForm>; onApplied: () => void }) {
   const [mode, setMode] = useState<OnlineMode>("match");
@@ -525,7 +524,6 @@ function ModeSearch({ track, plugins, settings, form, onApplied, mode, onChangeM
         result={reviewResult}
         plugin={plugins.find(plugin => plugin.id === reviewPluginId)}
         trackPath={track.path}
-        targetHasCover={track.hasCover}
         currentTrackPath={() => currentPathRef.current}
         settings={settings}
         targetForm={form}
@@ -603,11 +601,10 @@ function ModeSearch({ track, plugins, settings, form, onApplied, mode, onChangeM
 }
 
 /** One candidate, one target selection, one atomic update to the local editing draft. */
-function SongResultReview({ result, plugin, trackPath, targetHasCover, currentTrackPath, settings, targetForm, onClose, onApplied }: {
+function SongResultReview({ result, plugin, trackPath, currentTrackPath, settings, targetForm, onClose, onApplied }: {
   result: PluginSongResult;
   plugin?: SourcePlugin;
   trackPath: string;
-  targetHasCover: boolean;
   currentTrackPath: () => string;
   settings: DesktopSettings;
   targetForm: FormInstance<TagForm>;
@@ -619,8 +616,8 @@ function SongResultReview({ result, plugin, trackPath, targetHasCover, currentTr
   const patch = useMemo(() => resultToTagPatch(result), [result]);
   const keys = useMemo(() => (Object.keys(patch) as Array<keyof TagForm>).filter(key => key !== "lyrics" && !isEmptyTagValue(patch[key])), [patch]);
   const [selectedKeys, setSelectedKeys] = useState(keys);
-  const [modes, setModes] = useState<Partial<Record<keyof TagForm, MatchMode>>>({});
-  const [bulkMode, setBulkMode] = useState<MatchMode>("overwrite");
+  const [reviewTab, setReviewTab] = useState("metadata");
+  const [lyricsRequested, setLyricsRequested] = useState(false);
   const [applying, setApplying] = useState(false);
   const [applyError, setApplyError] = useState<string>();
   const coverUrl = resultCoverUrl(result);
@@ -664,7 +661,7 @@ function SongResultReview({ result, plugin, trackPath, targetHasCover, currentTr
   }, [coverUrl, coverSize, coverRetry]);
 
   useEffect(() => {
-    if (!supportsLyrics) return;
+    if (!supportsLyrics || !lyricsRequested) return;
     const request = ++lyricsRequest.current;
     setLyricsLoading(true);
     setLyricsError(undefined);
@@ -698,7 +695,7 @@ function SongResultReview({ result, plugin, trackPath, targetHasCover, currentTr
       }
     })();
     return () => { lyricsRequest.current += 1; };
-  }, [result, plugin, patch.lyrics, supportsLyrics, settings, lyricsRetry, t]);
+  }, [result, plugin, patch.lyrics, supportsLyrics, lyricsRequested, settings, lyricsRetry, t]);
 
   async function changeLyrics(candidate: PluginLyricsCandidate, format: LyricFormat) {
     const request = ++lyricsRequest.current;
@@ -726,10 +723,6 @@ function SongResultReview({ result, plugin, trackPath, targetHasCover, currentTr
     incomingLyricsSelected.current = selected;
     setLyricsSelected(selected && Boolean(lyricsText.trim()) && !lyricsError);
   };
-  const mediaPolicy = (key: "coverDataUrl" | "lyrics") => <Segmented size="small" disabled={applying}
-    value={modes[key] ?? "overwrite"}
-    options={[{ value: "overwrite", label: t("details.overwriteShort") }, { value: "supplement", label: t("details.supplementShort") }]}
-    onChange={value => setModes(current => ({ ...current, [key]: value as MatchMode }))} />;
   async function apply() {
     if (!valid() || !selectedCount || applying) return;
     setApplying(true);
@@ -737,18 +730,17 @@ function SongResultReview({ result, plugin, trackPath, targetHasCover, currentTr
     try {
       const values = await reviewForm.validateFields();
       if (!valid()) return;
-      const current = targetForm.getFieldsValue(true) as unknown as Record<string, unknown>;
       const confirmed: Partial<TagForm> = {};
       const output = confirmed as Record<string, unknown>;
       const source = values as unknown as Record<string, unknown>;
       selectedKeys.forEach(key => {
-        if (!isEmptyTagValue(source[key]) && ((modes[key] ?? "overwrite") === "overwrite" || isEmptyTagValue(current[key]))) output[key] = source[key];
+        if (!isEmptyTagValue(source[key])) output[key] = source[key];
       });
-      if (coverSelected && coverData && ((modes.coverDataUrl ?? "overwrite") === "overwrite" || current.removeCover || (!targetHasCover && isEmptyTagValue(current.coverDataUrl)))) {
+      if (coverSelected && coverData) {
         confirmed.coverDataUrl = coverData;
         confirmed.removeCover = false;
       }
-      if (lyricsSelected && lyricsText.trim() && !lyricsLoading && !lyricsError && ((modes.lyrics ?? "overwrite") === "overwrite" || isEmptyTagValue(current.lyrics))) confirmed.lyrics = lyricsText;
+      if (lyricsSelected && lyricsText.trim() && !lyricsLoading && !lyricsError) confirmed.lyrics = lyricsText;
       if (!valid()) return;
       targetForm.setFieldsValue(confirmed);
       onApplied();
@@ -758,6 +750,9 @@ function SongResultReview({ result, plugin, trackPath, targetHasCover, currentTr
       if (valid()) setApplying(false);
     }
   }
+  const toggleField = (key: keyof TagForm, enabled: boolean) => {
+    if (!applying) setSelectedKeys(current => enabled ? [...new Set([...current, key])] : current.filter(item => item !== key));
+  };
   const coverLoading = Boolean(coverUrl && !coverData && !coverError);
   return <Modal centered open width={760} className="song-result-review" title={t("details.reviewSongTitle")}
     okText={t("details.confirmApply")} confirmLoading={applying}
@@ -772,12 +767,12 @@ function SongResultReview({ result, plugin, trackPath, targetHasCover, currentTr
       ]} />
       <Flex align="center" justify="space-between" gap={12} wrap>
         <Checkbox disabled={applying} checked={availableCount > 0 && selectedCount === availableCount} indeterminate={selectedCount > 0 && selectedCount < availableCount} onChange={event => toggleAll(event.target.checked)}>{t("details.selectAllFields")}</Checkbox>
-        <Segmented disabled={applying} value={bulkMode} options={[{ value: "overwrite", label: t("details.overwrite") }, { value: "supplement", label: t("details.supplement") }]}
-          onChange={value => { setBulkMode(value as MatchMode); setModes(Object.fromEntries([...keys, "coverDataUrl", "lyrics"].map(key => [key, value]))); }} />
       </Flex>
+      <Tabs activeKey={reviewTab} onChange={key => { setReviewTab(key); if (key === "lyrics") setLyricsRequested(true); }} items={[
+        { key: "metadata", label: t("details.modeMatch"), children: <Form form={reviewForm} layout="vertical" requiredMark={false}>
       <div className="song-result-media">
         <section className="song-result-cover"><Space orientation="vertical" size={12} className="full-width">
-          <Flex align="center" justify="space-between" gap={12}><Checkbox disabled={!coverUrl || applying} checked={coverSelected} onChange={event => setCoverSelected(event.target.checked)}>{t("details.includeCover")}</Checkbox>{mediaPolicy("coverDataUrl")}</Flex>
+          <Flex align="center" justify="space-between" gap={12}><Checkbox disabled={!coverUrl || applying} checked={coverSelected} onChange={event => setCoverSelected(event.target.checked)}>{t("details.includeCover")}</Checkbox></Flex>
           {!coverUrl ? <Text type="secondary">{t("details.coverUnavailable")}</Text> : <>
             {coverError ? <Alert type="error" showIcon message={coverError} action={<Button size="small" onClick={() => setCoverRetry(current => current + 1)}>{t("details.retryReview")}</Button>} /> : null}
             <div className="online-cover-preview"><Spin spinning={coverLoading}><span className="artwork-frame"><Avatar shape="square" size={180} src={coverData} />{coverDimensions ? <span className="cover-dimensions">{coverDimensions.width} × {coverDimensions.height}</span> : null}</span></Spin></div>
@@ -785,8 +780,12 @@ function SongResultReview({ result, plugin, trackPath, targetHasCover, currentTr
             <Text type="secondary">{t("details.coverSizeHint")}</Text>
           </>}
         </Space></section>
-        <section className="song-result-lyrics"><Space orientation="vertical" size={12} className="full-width">
-          <Flex align="center" justify="space-between" gap={12}><Checkbox disabled={!lyricsText.trim() || lyricsLoading || Boolean(lyricsError) || applying} checked={lyricsSelected} onChange={event => { incomingLyricsSelected.current = event.target.checked; setLyricsSelected(event.target.checked); }}>{t("details.includeLyrics")}</Checkbox>{mediaPolicy("lyrics")}</Flex>
+        <MatchReviewFields keys={keys.filter(key => ["title", "artist", "album"].includes(key))} selectedKeys={selectedKeys} disabled={applying} onToggle={toggleField} />
+      </div>
+      <div className="song-result-fields"><MatchReviewFields keys={keys.filter(key => !["title", "artist", "album"].includes(key))} selectedKeys={selectedKeys} disabled={applying} onToggle={toggleField} /></div>
+      </Form> },
+      ...(supportsLyrics ? [{ key: "lyrics", label: t("details.modeLyrics"), children: <section className="song-result-lyrics"><Space orientation="vertical" size={12} className="full-width">
+          <Flex align="center" justify="space-between" gap={12}><Checkbox disabled={!lyricsText.trim() || lyricsLoading || Boolean(lyricsError) || applying} checked={lyricsSelected} onChange={event => { incomingLyricsSelected.current = event.target.checked; setLyricsSelected(event.target.checked); }}>{t("details.includeLyrics")}</Checkbox></Flex>
           {!supportsLyrics ? <Text type="secondary">{t("details.lyricsUnavailable")}</Text> : <>
             {lyricsError ? <Alert type="error" showIcon message={lyricsError} action={<Button size="small" onClick={() => setLyricsRetry(current => current + 1)}>{t("details.retryReview")}</Button>} /> : null}
             {lyricsLoading ? <Flex align="center" gap={8}><Spin size="small" /><Text type="secondary">{t("details.loadingReviewLyrics")}</Text></Flex> : null}
@@ -794,25 +793,20 @@ function SongResultReview({ result, plugin, trackPath, targetHasCover, currentTr
             {candidates.length ? <Select disabled={lyricsLoading || applying} value={lyricsFormat} options={LYRIC_FORMATS.map(format => ({ value: format, label: t(`lyrics.formats.${format}`) }))} onChange={(format: LyricFormat) => { const candidate = candidates.find(item => item.key === candidateKey); if (candidate) void changeLyrics(candidate, format); }} /> : null}
             {lyricsText ? <Input.TextArea disabled={lyricsLoading || applying || Boolean(lyricsError)} value={lyricsText} onChange={event => setLyricsText(event.target.value)} autoSize={{ minRows: 7, maxRows: 10 }} /> : null}
           </>}
-        </Space></section>
-      </div>
-      <MatchReviewFields form={reviewForm} keys={keys} selectedKeys={selectedKeys} modes={modes}
-        onToggle={(key, enabled) => { if (!applying) setSelectedKeys(current => enabled ? [...new Set([...current, key])] : current.filter(item => item !== key)); }}
-        onModeChange={(key, mode) => { if (!applying) setModes(current => ({ ...current, [key]: mode })); }} />
+        </Space></section> }] : []),
+      ]} />
     </Space>
   </Modal>;
 }
 
-function MatchReviewFields({ form, keys, selectedKeys, modes, onToggle, onModeChange }: {
-  form: FormInstance<TagForm>;
+function MatchReviewFields({ keys, selectedKeys, disabled, onToggle }: {
   keys: Array<keyof TagForm>;
   selectedKeys: Array<keyof TagForm>;
-  modes: Partial<Record<keyof TagForm, MatchMode>>;
+  disabled: boolean;
   onToggle: (key: keyof TagForm, enabled: boolean) => void;
-  onModeChange: (key: keyof TagForm, mode: MatchMode) => void;
 }) {
   const { t } = useTranslation();
-  if (!keys.length) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("details.noApplicableFields")} />;
+  if (!keys.length) return null;
   const control = (key: keyof TagForm, disabled: boolean) => {
     if (key === "genre") return <Select mode="tags" open={false} tokenSeparators={[";", "/", ","]} disabled={disabled} />;
     if (key === "trackNumber" || key === "discNumber") return <InputNumber min={1} precision={0} className="full-width" disabled={disabled} />;
@@ -821,29 +815,19 @@ function MatchReviewFields({ form, keys, selectedKeys, modes, onToggle, onModeCh
     return <Input disabled={disabled} />;
   };
   return (
-    <Form form={form} layout="vertical" requiredMark={false} className="match-review-form">
+    <div className="match-review-form">
       {keys.map((key) => {
         const selected = selectedKeys.includes(key);
         return (
           <div className={`match-field-row${selected ? "" : " is-disabled"}`} key={key}>
             <Flex align="center" justify="space-between" gap={12} wrap className="match-field-policy">
-              <Checkbox checked={selected} onChange={(event) => onToggle(key, event.target.checked)}>{tagFieldLabel(key, t)}</Checkbox>
-              <Segmented
-                size="small"
-                disabled={!selected}
-                value={modes[key] ?? "overwrite"}
-                options={[
-                  { value: "overwrite", label: t("details.overwriteShort") },
-                  { value: "supplement", label: t("details.supplementShort") },
-                ]}
-                onChange={(value) => onModeChange(key, value as MatchMode)}
-              />
+              <Checkbox disabled={disabled} checked={selected} onChange={(event) => onToggle(key, event.target.checked)}>{tagFieldLabel(key, t)}</Checkbox>
             </Flex>
-            <Form.Item name={key} noStyle>{control(key, !selected)}</Form.Item>
+            <Form.Item name={key} noStyle>{control(key, !selected || disabled)}</Form.Item>
           </div>
         );
       })}
-    </Form>
+    </div>
   );
 }
 

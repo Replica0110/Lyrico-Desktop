@@ -6,9 +6,30 @@ pub(crate) async fn process_lyrics_text(
     raw: String,
     options: LyricsOptions,
 ) -> Result<LyricsPipelineResult, String> {
-    tauri::async_runtime::spawn_blocking(move || lyrics::process_text(&raw, &options))
-        .await
-        .map_err(|error| error.to_string())?
+    let operation = crate::logging::Operation::new(
+        "lyrics",
+        "process_lyrics_text",
+        serde_json::json!({"inputBytes":raw.len()}),
+        log::Level::Debug,
+    );
+    let result = async {
+        tauri::async_runtime::spawn_blocking(move || lyrics::process_text(&raw, &options))
+            .await
+            .map_err(|error| error.to_string())?
+    }
+    .await;
+    if let Ok(result) = &result {
+        for warning in &result.warnings {
+            crate::logging::event(
+                log::Level::Warn,
+                "lyrics",
+                "conversion.warning",
+                serde_json::json!({"reason":warning}),
+            );
+        }
+    }
+    operation.finish(&result);
+    result
 }
 
 #[tauri::command]
@@ -17,11 +38,32 @@ pub(crate) async fn render_plugin_lyrics(
     target_format: LyricFormat,
     options: LyricsOptions,
 ) -> Result<LyricsPipelineResult, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        lyrics::process_plugin_result(&result, target_format, &options)
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    let operation = crate::logging::Operation::new(
+        "lyrics",
+        "render_plugin_lyrics",
+        serde_json::json!({"format":target_format}),
+        log::Level::Debug,
+    );
+    let result = async {
+        tauri::async_runtime::spawn_blocking(move || {
+            lyrics::process_plugin_result(&result, target_format, &options)
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+    .await;
+    if let Ok(result) = &result {
+        for warning in &result.warnings {
+            crate::logging::event(
+                log::Level::Warn,
+                "lyrics",
+                "conversion.warning",
+                serde_json::json!({"reason":warning}),
+            );
+        }
+    }
+    operation.finish(&result);
+    result
 }
 
 #[tauri::command]

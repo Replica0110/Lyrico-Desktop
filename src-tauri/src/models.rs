@@ -240,20 +240,6 @@ pub(crate) struct LyricLineMatch {
     pub(crate) matched_line: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct AppLogEntry {
-    pub(crate) id: i64,
-    pub(crate) created_at: String,
-    pub(crate) level: String,
-    #[serde(rename = "type")]
-    pub(crate) log_type: String,
-    pub(crate) tag: String,
-    pub(crate) message: String,
-    pub(crate) detail: Option<String>,
-    pub(crate) related_id: Option<String>,
-}
-
 fn default_true() -> bool {
     true
 }

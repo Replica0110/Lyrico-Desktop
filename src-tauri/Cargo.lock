@@ -14,7 +14,9 @@ dependencies = [
  "ecb",
  "ferrous-opencc",
  "flate2",
+ "flexi_logger",
  "image",
+ "log",
  "md-5",
  "quick-xml 0.42.0",
  "rayon",
@@ -1318,6 +1320,18 @@ dependencies = [
  "crc32fast",
  "miniz_oxide",
  "zlib-rs",
+]
+
+[[package]]
+name = "flexi_logger"
+version = "0.31.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4945fa9cdfd7571192cf559c186d45ab36c8034482a2d217a19bdc566f190cc"
+dependencies = [
+ "chrono",
+ "log",
+ "regex",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

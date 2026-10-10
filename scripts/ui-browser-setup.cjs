@@ -31,7 +31,7 @@ async (page) => {
         id:'musicbrainz', name:'MusicBrainz 元数据', versionCode:120, versionName:'1.2.0', author:'Lyrico',
         description:'从 MusicBrainz 检索专辑与曲目标签，支持按专辑整体匹配。',
         apiVersion:5, minHostApiVersion:5, entry:'index.js', includeDirs:[], enabled:true,
-        capabilities:['metadata','covers'], sortOrder:0,
+        capabilities:['searchSongs','getLyrics'], sourceStates:{metadata:{enabled:true,priority:0},covers:{enabled:true,priority:0}}, sortOrder:0,
         configFields:[
           {key:'endpoint',title:'服务地址',summary:'留空时使用官方服务',type:'text',defaultValue:'https://musicbrainz.org'},
           {key:'token',title:'访问令牌',type:'password',required:true,defaultValue:''},
@@ -48,7 +48,7 @@ async (page) => {
         id:'lrclib', name:'LRCLIB 歌词', versionCode:210, versionName:'2.1.0', author:'community',
         description:'公开歌词库，按标题与艺术家检索同步歌词。',
         apiVersion:5, minHostApiVersion:5, entry:'main.js', includeDirs:[], enabled:false,
-        capabilities:['lyrics'], sortOrder:1, configFields:[],
+        capabilities:['searchSongs','getLyrics'], sourceStates:{lyrics:{enabled:true,priority:0}}, sortOrder:1, configFields:[],
         pluginDir:'C:/Plugins/lrclib', sortOrder:1,
         installedAt:'2026-08-20T10:00:00Z', updatedAt:'2026-09-20T10:00:00Z', config:{},
       },

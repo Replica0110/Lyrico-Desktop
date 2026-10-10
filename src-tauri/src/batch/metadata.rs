@@ -270,19 +270,15 @@ fn log_source_warning(
     message: &str,
     error: &str,
 ) {
-    let detail = json!({
-        "itemId": context.item.item_id,
-        "songPath": context.item.song_path,
-        "pluginId": plugin.manifest.id,
-        "error": error,
-    })
-    .to_string();
-    let _ = tauri::async_runtime::block_on(context.database.log_batch_event(
-        "warning",
-        message,
-        Some(detail),
-        &context.task.task_id,
-    ));
+    // The plugin invocation event contains a sanitized cause; do not repeat arbitrary
+    // plugin error text here, where plugin config secrets are no longer available.
+    let _ = error;
+    crate::logging::event(
+        log::Level::Warn,
+        "batch",
+        "source.fallback",
+        json!({"taskId":context.task.task_id,"itemId":context.item.item_id,"songPath":context.item.song_path,"pluginId":plugin.manifest.id,"reason":message}),
+    );
 }
 
 fn parse_config(raw: Option<&str>) -> Result<MatchConfig, ProcessError> {

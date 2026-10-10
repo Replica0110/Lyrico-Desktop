@@ -1,31 +1,40 @@
 .song-result-review .ant-modal-body {
-  max-height: calc(100dvh - 210px);
+  max-height: calc(100dvh - 180px);
   min-height: 160px;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-
+.song-result-review .ant-descriptions-item-content { overflow-wrap: anywhere; }
 .song-result-media {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 196px minmax(0, 1fr);
   align-items: start;
-  gap: 16px;
+  gap: 20px;
 }
-
-.song-result-media > section {
+.song-result-media > * { min-width: 0; }
+.song-result-cover .online-cover-preview { justify-content: flex-start; }
+.song-result-cover .ant-typography { font-size: 12px; }
+.song-result-review .match-field-row {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
   min-width: 0;
 }
-
-.song-result-media .ant-flex {
-  flex-wrap: wrap;
+.song-result-review .match-review-form { gap: 12px; }
+.song-result-fields { margin-top: 20px; }
+.song-result-fields .match-review-form {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px 16px;
 }
-
-@media (max-width: 600px) {
-  .song-result-media {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.song-result-review .match-field-row .ant-input,
+.song-result-review .match-field-row .ant-select { width: 100%; }
+.song-result-lyrics textarea { font-family: var(--font-mono, monospace); }
+@media (max-width: 800px) {
+  .song-result-fields .match-review-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-
-.song-result-review .ant-descriptions-item-content {
-  overflow-wrap: anywhere;
+@media (max-width: 540px) {
+  .song-result-media { grid-template-columns: minmax(0, 1fr); }
+  .song-result-fields .match-review-form { grid-template-columns: minmax(0, 1fr); }
 }

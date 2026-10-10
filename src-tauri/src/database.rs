@@ -1,6 +1,4 @@
-use crate::models::{
-    AppLogEntry, AudioTrack, BatchTask, BatchTaskItem, LibraryFolder, LyricLineMatch,
-};
+use crate::models::{AudioTrack, BatchTask, BatchTaskItem, LibraryFolder, LyricLineMatch};
 use rusqlite::{params, Connection, OptionalExtension, Row, ToSql, Transaction};
 use std::collections::HashMap;
 use std::fs;
@@ -9,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const DATABASE_SCHEMA_VERSION: u32 = 8;
+const DATABASE_SCHEMA_VERSION: u32 = 9;
 static NEXT_BATCH_ID: AtomicU64 = AtomicU64::new(1);
 const BATCH_TASK_TYPES: &[&str] = &[
     "matchMetadata",
@@ -53,15 +51,79 @@ pub(crate) struct PluginRecord {
 
 impl Database {
     pub(crate) async fn open(path: &Path) -> Result<Self, String> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        let operation = crate::logging::Operation::new(
+            "database",
+            "open",
+            serde_json::json!({"schemaVersion":DATABASE_SCHEMA_VERSION}),
+            log::Level::Info,
+        );
+        let result = (|| {
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            let connection = Connection::open(path).map_err(|error| error.to_string())?;
+            configure_connection(&connection)?;
+            migrate_schema(&connection)?;
+            Ok(Self {
+                connection: Arc::new(Mutex::new(connection)),
+            })
+        })();
+        operation.finish(&result);
+        result
+    }
+
+    /// Export old diagnostic rows before dropping the retired table. A failed export
+    /// leaves the table intact; fresh databases never create it.
+    pub(crate) async fn migrate_legacy_logs(&self, directory: &Path) -> Result<(), String> {
+        let connection = self.lock()?;
+        let exists: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_logs')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        if !exists {
+            return Ok(());
         }
-        let connection = Connection::open(path).map_err(|error| error.to_string())?;
-        configure_connection(&connection)?;
-        migrate_schema(&connection)?;
-        Ok(Self {
-            connection: Arc::new(Mutex::new(connection)),
-        })
+        fs::create_dir_all(directory).map_err(|error| error.to_string())?;
+        let archive = directory.join(format!(
+            "legacy-database-{}-{}.log",
+            now(),
+            std::process::id()
+        ));
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&archive)
+            .map_err(|error| error.to_string())?;
+        let result: Result<(), String> = (|| {
+            let mut statement = connection.prepare("SELECT created_at,level,type,tag,message,detail,related_id FROM app_logs ORDER BY id").map_err(|error|error.to_string())?;
+            let entries = statement.query_map([], |row| Ok(serde_json::json!({
+                "legacyTime":row.get::<_,String>(0)?,"level":row.get::<_,String>(1)?,"module":row.get::<_,String>(2)?,
+                "tag":row.get::<_,String>(3)?,"message":row.get::<_,String>(4)?,"detail":row.get::<_,Option<String>>(5)?,"relatedId":row.get::<_,Option<String>>(6)?
+            }))).map_err(|error|error.to_string())?;
+            for entry in entries {
+                crate::logging::write_legacy(&mut file, entry.map_err(|error| error.to_string())?)
+                    .map_err(|error| error.to_string())?;
+            }
+            file.sync_all().map_err(|error| error.to_string())?;
+            connection
+                .execute_batch("DROP TABLE app_logs;")
+                .map_err(|error| error.to_string())?;
+            Ok(())
+        })();
+        if result.is_err() {
+            // Keep a partial archive for diagnosis and the complete source table for retry.
+            return result;
+        }
+        crate::logging::event(
+            log::Level::Info,
+            "database",
+            "legacy_logs.archived",
+            serde_json::json!({"archive":archive.file_name().and_then(|name|name.to_str())}),
+        );
+        Ok(())
     }
 
     #[cfg(test)]
@@ -1038,24 +1100,6 @@ impl Database {
         load_batch_task(&connection, task_id)
     }
 
-    pub(crate) async fn log_batch_event(
-        &self,
-        level: &str,
-        message: &str,
-        detail: Option<String>,
-        related_id: &str,
-    ) -> Result<(), String> {
-        let connection = self.lock()?;
-        connection
-            .execute(
-                "INSERT INTO app_logs (created_at, level, type, tag, message, detail, related_id)
-             VALUES (?1, ?2, 'batch', 'BatchManager', ?3, ?4, ?5)",
-                params![now().to_string(), level, message, detail, related_id],
-            )
-            .map_err(|error| error.to_string())?;
-        Ok(())
-    }
-
     pub(crate) async fn search_lyrics_lines(
         &self,
         query: &str,
@@ -1113,39 +1157,6 @@ impl Database {
             }
         }
         Ok(matches)
-    }
-
-    pub(crate) async fn load_app_logs(
-        &self,
-        level: Option<String>,
-        limit: u32,
-    ) -> Result<Vec<AppLogEntry>, String> {
-        let connection = self.lock()?;
-        let mut statement = connection
-            .prepare(
-                "SELECT id, created_at, level, type, tag, message, detail, related_id
-                 FROM app_logs
-                 WHERE (?1 IS NULL OR level = ?1)
-                 ORDER BY created_at DESC, id DESC
-                 LIMIT ?2",
-            )
-            .map_err(|error| error.to_string())?;
-        let rows = statement
-            .query_map(params![level, limit.clamp(1, 500)], |row| {
-                Ok(AppLogEntry {
-                    id: row.get(0)?,
-                    created_at: row.get(1)?,
-                    level: row.get(2)?,
-                    log_type: row.get(3)?,
-                    tag: row.get(4)?,
-                    message: row.get(5)?,
-                    detail: row.get(6)?,
-                    related_id: row.get(7)?,
-                })
-            })
-            .map_err(|error| error.to_string())?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|error| error.to_string())
     }
 
     pub(crate) async fn finish_batch_task(
@@ -1842,12 +1853,6 @@ CREATE TABLE IF NOT EXISTS batch_task_items (
     FOREIGN KEY(task_id) REFERENCES batch_tasks(task_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_batch_task_items_task ON batch_task_items(task_id, status);
-CREATE TABLE IF NOT EXISTS app_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL,
-    level TEXT NOT NULL, type TEXT NOT NULL, tag TEXT NOT NULL,
-    message TEXT NOT NULL, detail TEXT, related_id TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_app_logs_lookup ON app_logs(type, level, created_at);
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT ''
 );
@@ -1856,6 +1861,47 @@ CREATE TABLE IF NOT EXISTS settings (
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_logs_are_archived_before_table_removal_and_failed_export_keeps_rows() {
+        tauri::async_runtime::block_on(async {
+            let database = Database::in_memory().await.unwrap();
+            database.lock().unwrap().execute_batch("CREATE TABLE app_logs(id INTEGER PRIMARY KEY,created_at TEXT,level TEXT,type TEXT,tag TEXT,message TEXT,detail TEXT,related_id TEXT); INSERT INTO app_logs VALUES(1,'1791580000','info','batch','BatchManager','Batch task finished','{\"configJson\":\"secret\"}','task-1');").unwrap();
+            let directory = std::env::temp_dir().join(format!(
+                "lyrico-legacy-log-test-{}-{}",
+                std::process::id(),
+                NEXT_BATCH_ID.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::write(&directory, "not a directory").unwrap();
+            assert!(database.migrate_legacy_logs(&directory).await.is_err());
+            let count: i64 = database
+                .lock()
+                .unwrap()
+                .query_row("SELECT count(*) FROM app_logs", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(count, 1);
+            fs::remove_file(&directory).unwrap();
+            database.migrate_legacy_logs(&directory).await.unwrap();
+            assert!(database
+                .lock()
+                .unwrap()
+                .prepare("SELECT * FROM app_logs")
+                .is_err());
+            let archive = fs::read_dir(&directory)
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap()
+                .path();
+            let text = fs::read_to_string(archive).unwrap();
+            assert!(text.contains("relatedId=task-1"));
+            assert!(!text.starts_with('{'));
+            assert!(!text.contains("secret"));
+            database.migrate_legacy_logs(&directory).await.unwrap();
+            assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+            fs::remove_dir_all(directory).unwrap();
+        });
+    }
 
     #[test]
     fn batch_song_paths_are_deduplicated_by_normalized_key() {

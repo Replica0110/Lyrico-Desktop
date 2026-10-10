@@ -1553,7 +1553,7 @@ html[data-theme="dark"] .app-content {
   padding-left: 20px;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 4px;
+  gap: 4px 20px;
 }
 
 /* Progress bar: one implementation for global strips and in-panel progress. */
@@ -1605,49 +1605,12 @@ html[data-theme="dark"] .app-content {
   margin-top: 8px;
 }
 
-.about-collapse {
-  margin-top: 12px;
-  background: transparent;
-}
-
-.contributor-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.contributor-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  padding: 6px 4px;
-  border: 0;
-  border-radius: var(--surface-radius);
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.contributor-row:hover {
-  background: rgba(22, 119, 255, 0.08);
-}
-
-.contributor-avatar {
-  width: 36px;
-  height: 36px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  object-fit: cover;
-}
-
-.contributor-copy {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-}
+/* Credits are a manually maintained grid, always visible. */
+.contributor-list { display: grid; grid-template-columns: repeat(auto-fill, 80px); gap: 12px; }
+.contributor-row { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px 2px; border: 0; border-radius: var(--surface-radius); background: transparent; color: inherit; cursor: pointer; }
+.contributor-row:hover { background: var(--hover-bg); }
+.contributor-row:focus-visible { outline: 2px solid var(--ant-color-primary); }
+.contributor-row .ant-typography { overflow-wrap: anywhere; font-size: 12px; }
 .app-statusbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: 0 0 30px; height: 30px; min-width: 0; padding: 3px var(--page-padding); border-top: 1px solid var(--border-color); background: var(--bg-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
 .statusbar-activities { display: flex; gap: 8px; min-width: 0; }
 .app-statusbar > .ant-typography { min-width: 0; flex: 1; }
@@ -1691,12 +1654,13 @@ html[data-theme="dark"] .app-content {
 .artist-rule-list { display: flex; flex-direction: column; gap: 8px; }
 /* Separators are one or two characters: keep their rows compact. */
 .artist-rule-list.is-compact .ant-input { max-width: 140px; }
-.about-page { max-width: 600px; margin: 0 auto; padding: 32px 20px; text-align: center; }
+.about-page { max-width: 600px; margin: 0 auto; padding: 20px; text-align: center; }
 .about-page > h2 { margin: 12px 0 4px; }
 .about-page > .ant-typography { display: block; }
 .about-page > .ant-typography + .ant-typography { margin-top: 12px; }
-.about-app-icon { width: 72px; height: 72px; object-fit: contain; }
-.about-page .ant-collapse { text-align: left; margin-top: 24px; }
+.about-app-icon { width: 48px; height: 48px; object-fit: contain; }
+.about-section { text-align: left; margin-top: 28px; }
+.about-section > h3 { font-size: 16px; margin: 0 0 16px; }
 .about-license-list { list-style: none; padding: 0; }
 .about-license-list > li { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding-block: 6px; }
 .selection-page { height: 100%; }
@@ -1707,3 +1671,5 @@ html[data-theme="dark"] .app-content {
   .selection-album { display: none; }
 }
 @media (max-width: 760px) { .tag-field-grid { grid-template-columns: minmax(0, 1fr); } }
+
+.about-links { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }

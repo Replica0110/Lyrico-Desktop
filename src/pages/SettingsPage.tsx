@@ -1,5 +1,5 @@
-import { ApiOutlined, AudioOutlined, EditOutlined, FileTextOutlined, FolderOpenOutlined, GlobalOutlined, InfoCircleOutlined, ImportOutlined, ExportOutlined, ScissorOutlined, SoundOutlined, SyncOutlined } from "@ant-design/icons";
-import { App as AntApp, Avatar, Button, Collapse, Flex, Input, InputNumber, Modal, Select, Space, Spin, Switch, Table, Tabs, Tag, Typography, type TableColumnsType } from "antd";
+import { ApiOutlined, AudioOutlined, EditOutlined, FileTextOutlined, FolderOpenOutlined, GlobalOutlined, InfoCircleOutlined, ImportOutlined, ExportOutlined, ScissorOutlined, SoundOutlined } from "@ant-design/icons";
+import { App as AntApp, Avatar, Button, Flex, Input, InputNumber, Modal, Select, Space, Switch, Tabs, Typography } from "antd";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -9,12 +9,11 @@ import type { LanguagePreference } from "../i18n";
 import { SortableList } from "../components/SortableList";
 import appIcon from "../assets/app-icon.png";
 import { ArtistSplitSettings } from "../components/ArtistSplitSettings";
-import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
-import { exportConfig, importConfig, loadAppLogs, pickPaths, pickSavePath, writeTextFile, type AppLogEntry, type ThemeMode } from "../backend/audioApi";
+import { exportConfig, importConfig, openLogsDirectory, pickPaths, pickSavePath, type ThemeMode } from "../backend/audioApi";
 import { normalizeCleanupKeywords, normalizeLyricLineOrder } from "../domain/lyricsSettings";
 import { normalizeEditFieldOrder, EDIT_FIELD_LABEL_KEYS, REPLAY_GAIN_BLOCK_KEY, toEditFieldBlocks, withEditFieldBlockMembers } from "../domain/editFieldSettings";
-import { parseTimeValue } from "../utils/format";
+import { CONTRIBUTORS } from "../data/contributors";
 
 const { Text } = Typography;
 
@@ -230,9 +229,7 @@ export function SettingsPage({
               label: t("settings.logs"),
               icon: <FileTextOutlined />,
               children: (
-                <SettingsSection title={t("settings.logs")}>
-                  <AppLogsSection />
-                </SettingsSection>
+                <AppLogsSection />
               ),
             },
             {
@@ -441,123 +438,21 @@ function BackupImportButton({ onImported }: { onImported: () => void }) {
   return <Button icon={<ImportOutlined />} loading={busy} onClick={() => void handleImport()}>{t("settings.importConfig")}</Button>;
 }
 
-const LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
-
-
-
 function AppLogsSection() {
   const { t } = useTranslation();
-  const [level, setLevel] = useState<string>();
-  const [logType, setLogType] = useState<string>();
-  const [refreshToken, setRefreshToken] = useState(0);
-  const [logs, setLogs] = useState<AppLogEntry[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    let disposed = false;
-    setLoading(true);
-    loadAppLogs(level, 500)
-      .then((entries) => {
-        if (!disposed) setLogs(entries);
-      })
-      .catch(() => {
-        if (!disposed) setLogs([]);
-      })
-      .finally(() => {
-        if (!disposed) setLoading(false);
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [level, refreshToken]);
-
-  const visibleLogs = logType ? logs.filter((entry) => entry.type === logType) : logs;
-  const logTypes = [...new Set(logs.map((entry) => entry.type).filter(Boolean))].sort();
-
-  async function exportLogs() {
-    const destination = await pickSavePath({
-      title: t("settings.logsExport"),
-      defaultPath: "lyrico-logs.txt",
-      filters: [{ name: "Text", extensions: ["txt"] }],
-    });
-    if (!destination) return;
-    await writeTextFile(
-      destination,
-      visibleLogs.map((entry) => [
-        entry.createdAt,
-        entry.level.toUpperCase(),
-        entry.type,
-        entry.tag,
-        entry.message,
-        entry.detail ?? "",
-      ].join("\t")).join("\n"),
-    );
+  const { message } = AntApp.useApp();
+  const [opening, setOpening] = useState(false);
+  async function openDirectory() {
+    setOpening(true);
+    try { await openLogsDirectory(); }
+    catch (error) { void message.error(String(error)); }
+    finally { setOpening(false); }
   }
-
-  const columns: TableColumnsType<AppLogEntry> = [
-    {
-      title: t("settings.logsTime"),
-      dataIndex: "createdAt",
-      width: 170,
-      sorter: (left, right) => parseTimeValue(left.createdAt) - parseTimeValue(right.createdAt),
-    },
-    {
-      title: t("settings.logsLevel"),
-      dataIndex: "level",
-      width: 96,
-      render: (value: string) => (
-        <Tag color={value === "error" ? "red" : value === "warn" ? "orange" : value === "info" ? "blue" : "default"}>
-          {value.toUpperCase()}
-        </Tag>
-      ),
-    },
-    { title: t("settings.logsMessage"), dataIndex: "message", ellipsis: true },
-    { title: t("settings.logsTag"), dataIndex: "tag", width: 130, ellipsis: true },
-  ];
-
-  return (
-    <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-      <Space wrap>
-        <Select
-          allowClear
-          placeholder={t("settings.logsAll")}
-          value={level}
-          onChange={(value) => setLevel(value)}
-          style={{ width: 160 }}
-          options={LOG_LEVELS.map((value) => ({ value, label: value }))}
-        />
-        <Select
-          allowClear
-          placeholder={t("settings.logsAllTypes")}
-          value={logType}
-          onChange={(value) => setLogType(value)}
-          style={{ width: 160 }}
-          options={logTypes.map((value) => ({ value, label: value }))}
-        />
-        <Button icon={<SyncOutlined />} loading={loading} onClick={() => setRefreshToken((token) => token + 1)}>
-          {t("settings.logsRefresh")}
-        </Button>
-        <Button onClick={() => void exportLogs()} disabled={visibleLogs.length === 0}>{t("settings.logsExport")}</Button>
-        <Text type="secondary">{t("settings.logsCount", { count: visibleLogs.length })}</Text>
-      </Space>
-      <Table
-        rowKey="id"
-        size="small"
-        loading={loading}
-        columns={columns}
-        dataSource={visibleLogs}
-        pagination={{ pageSize: 10, showSizeChanger: false }}
-        expandable={{
-          expandedRowRender: (record) => (
-            <Text type="secondary" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-              {record.detail ?? record.relatedId ?? "—"}
-            </Text>
-          ),
-        }}
-        locale={{ emptyText: <EmptyState description={t("settings.logsEmpty")} /> }}
-      />
-    </Space>
-  );
+  return <SettingsSection title={t("settings.logs")}>
+    <SettingRow title={t("settings.logsDirectory")} description={t("settings.logsFileHint")}>
+      <Button icon={<FolderOpenOutlined />} loading={opening} onClick={() => void openDirectory()}>{t("settings.logsOpenDirectory")}</Button>
+    </SettingRow>
+  </SettingsSection>;
 }
 
 const OPEN_SOURCE_DEPENDENCIES = [
@@ -591,97 +486,25 @@ function AboutSection() {
       <Typography.Title level={2}>Lyrico</Typography.Title>
       <Text type="secondary">{t("settings.version")} {version || "—"}</Text>
       <Typography.Paragraph>{t("settings.aboutDescription")}</Typography.Paragraph>
-      <Button type="link" onClick={() => void openUrl("https://github.com/Replica0110/Lyrico-Desktop")}>{t("settings.projectHomepage")}</Button>
-      <Collapse
-        className="about-collapse"
-        items={[
-          {
-            key: "licenses",
-            label: t("settings.openSourceLicenses"),
-            children: (
-              <ul className="about-license-list">
-                {OPEN_SOURCE_DEPENDENCIES.map((dependency) => (
-                  <li key={dependency.name}>
-                    <Text>{dependency.name}</Text>
-                    <Text type="secondary">{dependency.license}</Text>
-                  </li>
-                ))}
-              </ul>
-            ),
-          },
-          {
-            key: "contributors",
-            label: t("settings.contributors"),
-            children: <ContributorsSection />,
-          },
-        ]}
-      />
+      <div className="about-links">
+        <Button type="link" onClick={() => void openUrl("https://github.com/Replica0110/Lyrico-Desktop")}>{t("settings.projectHomepage")}</Button>
+        <Button type="link" onClick={() => void openUrl("https://github.com/Replica0110/Lyrico-Desktop/issues")}>{t("settings.reportIssue")}</Button>
+      </div>
+      <section className="about-section">
+        <Typography.Title level={3}>{t("settings.contributors")}</Typography.Title>
+        <ContributorsSection />
+      </section>
+      <section className="about-section">
+        <Typography.Title level={3}>{t("settings.openSourceLicenses")}</Typography.Title>
+        <ul className="about-license-list">{OPEN_SOURCE_DEPENDENCIES.map(dependency => <li key={dependency.name}><Text>{dependency.name}</Text><Text type="secondary">{dependency.license}</Text></li>)}</ul>
+      </section>
     </section>
   );
 }
 
-type GitHubContributor = {
-  id: number;
-  login: string;
-  avatar_url: string;
-  html_url: string;
-  contributions: number;
-  type: string;
-};
-
 function ContributorsSection() {
-  const { t } = useTranslation();
-  const [contributors, setContributors] = useState<GitHubContributor[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let disposed = false;
-    setLoading(true);
-    setFailed(false);
-    fetch("https://api.github.com/repos/Replica0110/Lyrico-Desktop/contributors?per_page=100")
-      .then((response) => {
-        if (!response.ok) throw new Error(String(response.status));
-        return response.json() as Promise<GitHubContributor[]>;
-      })
-      .then((entries) => {
-        if (disposed) return;
-        setContributors(
-          entries
-            .filter((entry) => entry.type !== "Bot")
-            .sort((left, right) => right.contributions - left.contributions),
-        );
-      })
-      .catch(() => {
-        if (!disposed) setFailed(true);
-      })
-      .finally(() => {
-        if (!disposed) setLoading(false);
-      });
-    return () => {
-      disposed = true;
-    };
-  }, []);
-
-  if (loading) return <Spin />;
-  if (failed) return <Text type="danger">{t("settings.contributorsFailed")}</Text>;
-  if (contributors.length === 0) return <Text type="secondary">{t("settings.contributorsEmpty")}</Text>;
-  return (
-    <div className="contributor-list">
-      {contributors.map((contributor) => (
-        <button
-          key={contributor.id}
-          type="button"
-          className="contributor-row"
-          onClick={() => void openUrl(contributor.html_url)}
-        >
-          <Avatar src={contributor.avatar_url} size={36} className="contributor-avatar" />
-          <span className="contributor-copy">
-            <Text strong>{contributor.login}</Text>
-            <Text type="secondary">{t("settings.contributionCount", { total: contributor.contributions })}</Text>
-          </span>
-        </button>
-      ))}
-    </div>
-  );
+  return <div className="contributor-list">{CONTRIBUTORS.map(contributor => <button key={contributor.name} type="button" className="contributor-row" onClick={() => void openUrl(contributor.url)}>
+    <Avatar src={contributor.avatar} size={36}>{contributor.name[0]}</Avatar>
+    <Text>{contributor.name}</Text>
+  </button>)}</div>;
 }

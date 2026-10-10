@@ -1,5 +1,6 @@
 import { Button, Flex, Typography } from "antd";
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { reportFrontendError } from "../backend/diagnostics";
 import i18n from "../i18n";
 
 const { Text } = Typography;
@@ -22,6 +23,7 @@ export class AppErrorBoundary extends Component<{ children: ReactNode }, { faile
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
+    reportFrontendError("render", error, info.componentStack ?? "");
     console.error("AppErrorBoundary caught a render error", error, info.componentStack);
   }
 

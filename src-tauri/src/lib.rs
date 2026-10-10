@@ -4,6 +4,7 @@ mod commands;
 mod config;
 mod database;
 mod file_mutation;
+mod logging;
 mod lyrics;
 mod lyrics_commands;
 mod models;
@@ -18,12 +19,12 @@ use batch::BatchManager;
 use commands::{
     analyze_replay_gain, cancel_batch_task, cancel_batch_task_item, cancel_replay_gain,
     create_batch_task, delete_batch_tasks, export_config, fetch_remote_image, get_storage_info,
-    import_config, install_source_plugin_archive, invoke_source_plugin, load_app_logs,
-    load_artist_split_config, load_batch_task_items, load_batch_tasks, load_custom_tags,
-    load_desktop_settings, load_library_folders, load_library_track, load_library_tracks,
-    load_library_tracks_by_paths, load_source_plugins, load_track_covers, preview_batch_rename,
+    import_config, install_source_plugin_archive, invoke_source_plugin, load_artist_split_config,
+    load_batch_task_items, load_batch_tasks, load_custom_tags, load_desktop_settings,
+    load_library_folders, load_library_track, load_library_tracks, load_library_tracks_by_paths,
+    load_source_plugins, load_track_covers, open_logs_directory, preview_batch_rename,
     preview_source_plugin_archive, read_audio_file, read_image_file, read_text_file,
-    remove_library_folder, reorder_plugin_sources, retry_failed_batch_items,
+    remove_library_folder, reorder_plugin_sources, report_frontend_error, retry_failed_batch_items,
     save_artist_split_config, save_audio_tags, save_desktop_settings, save_source_plugin_settings,
     scan_folder, search_lyrics_lines, set_plugin_source_enabled, set_source_plugin_enabled,
     set_source_plugin_order, start_batch_task, uninstall_source_plugin, upsert_library_folder,
@@ -56,13 +57,23 @@ pub fn run() {
         .plugin(tauri_plugin_sharehub::init())
         .setup(|app| {
             let paths = resolve_data_paths(&app.handle()).map_err(std::io::Error::other)?;
+            if let Err(error) = logging::init(&paths.logs) {
+                eprintln!("Could not initialize file logging: {}", logging::redact(&error));
+            }
+            let startup = logging::Operation::new("app", "startup", serde_json::json!({"version":env!("CARGO_PKG_VERSION"),"os":std::env::consts::OS,"arch":std::env::consts::ARCH}), log::Level::Info);
             let database = tauri::async_runtime::block_on(Database::open(&paths.database))
                 .map_err(std::io::Error::other)?;
+            if let Err(error) = tauri::async_runtime::block_on(database.migrate_legacy_logs(&paths.logs)) {
+                logging::event(log::Level::Warn,"database","legacy_logs.archive_failed",serde_json::json!({"error":error}));
+            }
             let legacy_artist_split =
                 tauri::async_runtime::block_on(database.load_legacy_setting("artist_split_config"))
                     .map_err(std::io::Error::other)?;
             config::migrate_legacy_artist_split_config(&app.handle(), legacy_artist_split)
-                .map_err(std::io::Error::other)?;
+                .map_err(|error| {
+                    logging::event(log::Level::Error,"config","startup.failed",serde_json::json!({"error":error}));
+                    std::io::Error::other(error)
+                })?;
             app.manage(AppState {
                 database: database.clone(),
                 active_scans: Mutex::new(HashSet::new()),
@@ -73,6 +84,7 @@ pub fn run() {
             app.state::<AppState>()
                 .batch_manager
                 .recover(app.handle().clone());
+            startup.finish(&Ok::<(),String>(()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -123,12 +135,19 @@ pub fn run() {
             export_config,
             import_config,
             search_lyrics_lines,
-            load_app_logs,
+            open_logs_directory,
+            report_frontend_error,
             process_lyrics_text,
             render_plugin_lyrics,
             extract_plain_lyrics_text,
             detect_lyrics_format
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_, event| {
+            if let tauri::RunEvent::Exit = event {
+                logging::event(log::Level::Info,"app","shutdown",serde_json::json!({}));
+                logging::flush();
+            }
+        });
 }
