@@ -52,6 +52,7 @@ import { ArtistsPage } from "../pages/ArtistsPage";
 import { FoldersPage } from "../pages/FoldersPage";
 import { SongsPage } from "../pages/SongsPage";
 import { defaultArtistSplitConfig, filterTracks, groupAlbums, groupArtists } from "../domain/library";
+import { albumSortFields, artistSortFields, folderSortFields, trackSortFields, type AlbumSortField, type ArtistSortField, type FolderSortField, type SortState, type TrackSortField } from "../domain/sort";
 import { completeTagForm, splitGenreValues } from "../domain/tagForm";
 import { filterHiddenCustomTagEdits } from "../domain/editFieldSettings";
 import { detectLyricsFormat } from "../backend/lyricsApi";
@@ -63,7 +64,7 @@ import {
   setLanguagePreference as persistLanguagePreference,
   type LanguagePreference,
 } from "../i18n";
-import type { ArtistSplitConfig, AudioTrack, BatchTask, BatchTaskItem, CustomTag, DesktopSettings, LibraryFolder, ScanProgress, PluginSourceKind, SourcePlugin, TagForm, ViewKey } from "./types";
+import type { ArtistSplitConfig, AudioTrack, BatchTask, BatchTaskItem, CustomTag, DesktopSettings, LibraryFolder, LibrarySort, LibrarySortPage, ScanProgress, PluginSourceKind, SourcePlugin, TagForm, ViewKey } from "./types";
 
 const PluginsPage = lazy(() => import("../pages/PluginsPage").then((m) => ({ default: m.PluginsPage })));
 const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
@@ -99,6 +100,8 @@ const defaultDesktopSettings: DesktopSettings = {
   editFieldVisibility: {},
   editCustomTags: [],
   editFieldOrder: ["basic", "track", "credits", "customTags", "replaygain", "lyrics", "cover"],
+  librarySorts: {},
+  batchOperation: "replaygain",
   closeToTray: false,
   renameCharacterMappings: {
     "\\": "＼", "/": "／", ":": "：", "*": "＊", "?": "？", "\"": "＂", "<": "＜", ">": "＞", "|": "｜",
@@ -106,7 +109,14 @@ const defaultDesktopSettings: DesktopSettings = {
 };
 
 const desktopSettingsArrayFields = ["lyricLineOrder", "removeTagLineKeywords", "hiddenFolderPaths", "editFieldOrder", "editCustomTags"] as const;
-const desktopSettingsRecordFields = ["renameCharacterMappings", "editFieldVisibility"] as const;
+const desktopSettingsRecordFields = ["renameCharacterMappings", "editFieldVisibility", "librarySorts"] as const;
+
+const librarySortPageFields: Record<LibrarySortPage, ReadonlySet<string>> = {
+  songs: new Set(trackSortFields),
+  albums: new Set(albumSortFields),
+  artists: new Set(artistSortFields),
+  folders: new Set(folderSortFields),
+};
 
 /**
  * Settings written by an older build can miss fields. Merge what was stored onto the
@@ -130,6 +140,21 @@ function normalizeDesktopSettings(stored: unknown): DesktopSettings {
     }
   }
   if (typeof merged.artistPosterFolder !== "string") merged.artistPosterFolder = defaultDesktopSettings.artistPosterFolder;
+  if (typeof merged.batchOperation !== "string") merged.batchOperation = defaultDesktopSettings.batchOperation;
+  const storedSorts = merged.librarySorts as Record<string, unknown>;
+  for (const [page, entry] of Object.entries(storedSorts)) {
+    const allowed = librarySortPageFields[page as LibrarySortPage];
+    const candidate = entry as { key?: unknown; direction?: unknown } | null | undefined;
+    if (
+      !allowed
+      || !candidate
+      || typeof candidate.key !== "string"
+      || !allowed.has(candidate.key)
+      || (candidate.direction !== "asc" && candidate.direction !== "desc")
+    ) {
+      delete storedSorts[page];
+    }
+  }
   return merged as unknown as DesktopSettings;
 }
 
@@ -948,6 +973,13 @@ function LyricoDesktop() {
       });
   }
 
+  function changeLibrarySort(page: LibrarySortPage, sort?: LibrarySort) {
+    const next = { ...desktopSettings.librarySorts };
+    if (sort) next[page] = sort;
+    else delete next[page];
+    changeDesktopSettings({ ...desktopSettings, librarySorts: next });
+  }
+
   function toggleFolderHidden(path: string) {
     const hiddenFolders = desktopSettings.hiddenFolderPaths ?? [];
     const hidden = hiddenFolders.some((folder) => samePath(folder, path));
@@ -1000,6 +1032,8 @@ function LyricoDesktop() {
             selectionMode={selectionMode}
             onChangeSelectedPaths={onChangeSelectedPaths}
             onChangeSelectionMode={changeSelectionMode}
+            sort={desktopSettings.librarySorts.albums as SortState<AlbumSortField> | undefined}
+            onSortChange={(sort) => changeLibrarySort("albums", sort)}
           />
         );
       case "artists":
@@ -1022,6 +1056,8 @@ function LyricoDesktop() {
             onChangeSelectedPaths={onChangeSelectedPaths}
             onChangeSelectionMode={changeSelectionMode}
             artistPosters={artistPosters}
+            sort={desktopSettings.librarySorts.artists as SortState<ArtistSortField> | undefined}
+            onSortChange={(sort) => changeLibrarySort("artists", sort)}
           />
         );
       case "folders":
@@ -1039,6 +1075,8 @@ function LyricoDesktop() {
             onOpenTrack={openTrackDetails}
             selectedPaths={selectedPaths}
             onChangeSelectedPaths={onChangeSelectedPaths}
+            folderSort={desktopSettings.librarySorts.folders as SortState<FolderSortField> | undefined}
+            onFolderSortChange={(sort) => changeLibrarySort("folders", sort)}
           />
         );
       case "sources":
@@ -1089,6 +1127,8 @@ function LyricoDesktop() {
             onChangeQuery={onChangeQuery}
             onChangeSelectedPaths={onChangeSelectedPaths}
             onOpenDetails={openTrackDetails}
+            sort={desktopSettings.librarySorts.songs as SortState<TrackSortField> | undefined}
+            onSortChange={(sort) => changeLibrarySort("songs", sort)}
           />
         );
     }

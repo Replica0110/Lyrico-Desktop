@@ -40,7 +40,9 @@ export const FoldersPage = memo(function FoldersPage({
   onSelectFolder,
   onOpenTrack,
   selectedPaths,
+  folderSort,
   onChangeSelectedPaths,
+  onFolderSortChange,
 }: {
   folders: LibraryFolder[];
   tracks: AudioTrack[];
@@ -53,11 +55,12 @@ export const FoldersPage = memo(function FoldersPage({
   onSelectFolder: (path?: string) => void;
   onOpenTrack: (path: string) => void;
   selectedPaths: string[];
+  folderSort?: SortState<FolderSortField>;
   onChangeSelectedPaths: (paths: string[]) => void;
+  onFolderSortChange: (sort?: SortState<FolderSortField>) => void;
 }) {
   const { t } = useTranslation();
   const { modal } = App.useApp();
-  const [folderSort, setFolderSort] = useState<SortState<FolderSortField>>();
   const [currentKey, setCurrentKey] = useState<string>();
   const [query, setQuery] = useState("");
 
@@ -193,7 +196,7 @@ export const FoldersPage = memo(function FoldersPage({
               />
               <SortSelect
                 value={folderSort}
-                onChange={setFolderSort}
+                onChange={onFolderSortChange}
                 fields={folderSortFields.map((key) => ({ key, label: t(`sort.field.${key}`) }))}
               />
               {/* The empty state already offers this action; showing it twice on one screen is noise. */}

@@ -325,5 +325,6 @@ npx --yes --package @playwright/cli playwright-cli --session layout run-code --f
 - 插件列表为紧凑行：拖动把手、图标、名称和版本作者、启用开关、卸载按钮同排；长名称允许换行。保存位于详情固定标题栏，配置区独立滚动，不叠加底部操作条。
 - 元数据结果使用同一个居中确认窗口：封面和歌词并排，下方展示可选择的标签；一次应用选中数据到编辑草稿，随后由编辑器保存。每个媒体请求都校验当前歌曲和请求版本。
 - 在线匹配的元数据、歌词、封面模式分别保留关键词、结果、分页和来源选择；编辑器页签切换也保留。关闭抽屉后清理会话，换歌重新开始。抽屉保留挂载到 `afterOpenChange(false)`，保证关闭动画完整。
+- 列表页排序（SortSelect）与批处理当前功能持久化到 settings.json（`librarySorts` / `batchOperation`），启动后恢复；批处理各功能内部的勾选项、二级页面表格的表头排序不持久化
 
 结构参考：[VS Code 状态栏](https://code.visualstudio.com/api/ux-guidelines/status-bar)、[通知规范](https://code.visualstudio.com/api/ux-guidelines/notifications)；API 参考：[Ant Design Message](https://ant.design/components/message/)、[Notification](https://ant.design/components/notification/)、[dnd-kit sortable](https://dndkit.com/legacy/presets/sortable/overview/)。

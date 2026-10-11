@@ -1,6 +1,6 @@
 import { CheckOutlined, CheckSquareOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
 import { Button, Input, Typography } from "antd";
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { LibraryTable } from "../components/LibraryTable";
 import { PageHeader } from "../components/PageHeader";
@@ -33,6 +33,8 @@ export const ArtistsPage = memo(function ArtistsPage({
   onChangeSelectedPaths,
   onChangeSelectionMode,
   artistPosters,
+  sort,
+  onSortChange,
 }: {
   artists: ArtistGroup[];
   query: string;
@@ -51,9 +53,10 @@ export const ArtistsPage = memo(function ArtistsPage({
   onChangeSelectedPaths: (paths: string[]) => void;
   onChangeSelectionMode: (enabled: boolean) => void;
   artistPosters: Record<string, string>;
+  sort?: SortState<ArtistSortField>;
+  onSortChange: (sort?: SortState<ArtistSortField>) => void;
 }) {
   const { t } = useTranslation();
-  const [sort, setSort] = useState<SortState<ArtistSortField>>();
   const sortedArtists = useMemo(() => (sort ? sortArtistsBy(artists, sort.key, sort.direction) : artists), [artists, sort]);
   const selectedArtist = artists.find((artist) => artist.id === selectedArtistId);
   const { visibleCount, sentinelRef, hasMore } = useIncrementalGrid(sortedArtists.length);
@@ -103,7 +106,7 @@ export const ArtistsPage = memo(function ArtistsPage({
           <Input allowClear className="page-search" prefix={<SearchOutlined />} placeholder={t("search.placeholder", { scope: t("search.artists") })} value={query} onChange={(event) => onChangeQuery(event.target.value)} />
           <SortSelect
             value={sort}
-            onChange={setSort}
+            onChange={onSortChange}
             fields={artistSortFields.map((key) => ({ key, label: t(`sort.field.${key}`) }))}
           />
           {selectionMode

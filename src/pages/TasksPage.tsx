@@ -128,7 +128,8 @@ export function TasksPage({ tracks, plugins, selectedPaths, settings, artistSepa
   const { t } = useTranslation();
   const { message } = App.useApp();
   const [section, setSection] = useState("work");
-  const [operation, setOperation] = useState<BatchOperation>("replaygain");
+  const storedOperation = settings.batchOperation as BatchOperation;
+  const operation = availableOperations.has(storedOperation) ? storedOperation : "replaygain";
   const [activeReplayGainTask, setActiveReplayGainTask] = useState<BatchTask>();
   const [activeEditTask, setActiveEditTask] = useState<BatchTask>();
   const [activeLyricsTask, setActiveLyricsTask] = useState<BatchTask>();
@@ -248,7 +249,7 @@ export function TasksPage({ tracks, plugins, selectedPaths, settings, artistSepa
   function changeOperation(nextOperation: BatchOperation) {
     if (nextOperation === operation) return;
     clearFinishedSnapshots();
-    setOperation(nextOperation);
+    onChangeSettings({ ...settings, batchOperation: nextOperation });
   }
 
   function applyTaskSnapshot(setTask: Dispatch<SetStateAction<BatchTask | undefined>>, snapshot: BatchTask) {

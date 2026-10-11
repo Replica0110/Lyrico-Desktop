@@ -144,8 +144,14 @@ export type DesktopSettings = {
   editFieldVisibility: Record<string, boolean>;
   editFieldOrder: string[];
   editCustomTags: string[];
+  librarySorts: Partial<Record<LibrarySortPage, LibrarySort>>;
+  batchOperation: string;
   closeToTray: boolean;
 };
+
+export type LibrarySortPage = "songs" | "albums" | "artists" | "folders";
+
+export type LibrarySort = { key: string; direction: "asc" | "desc" };
 
 export type LyricLineTrack = "original" | "translation" | "romanization";
 

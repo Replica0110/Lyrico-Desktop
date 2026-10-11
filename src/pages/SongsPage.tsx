@@ -1,6 +1,6 @@
 import { FolderAddOutlined, SearchOutlined } from "@ant-design/icons";
 import { Button, Input } from "antd";
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import type { AudioTrack } from "../app/types";
 import { EmptyState } from "../components/EmptyState";
@@ -14,8 +14,10 @@ export const SongsPage = memo(function SongsPage({
   query,
   selectedPaths,
   loading,
+  sort,
   onChangeQuery,
   onChangeSelectedPaths,
+  onSortChange,
   onOpenDetails,
   onAddFolders,
 }: {
@@ -23,13 +25,14 @@ export const SongsPage = memo(function SongsPage({
   query: string;
   selectedPaths: string[];
   loading: boolean;
+  sort?: SortState<TrackSortField>;
   onChangeQuery: (query: string) => void;
   onChangeSelectedPaths: (paths: string[]) => void;
+  onSortChange: (sort?: SortState<TrackSortField>) => void;
   onOpenDetails: (path?: string) => void;
   onAddFolders: () => void;
 }) {
   const { t } = useTranslation();
-  const [sort, setSort] = useState<SortState<TrackSortField>>();
   const handleOpenTrack = useCallback((track: AudioTrack) => onOpenDetails(track.path), [onOpenDetails]);
   const searching = query.trim().length > 0;
   const empty = tracks.length === 0 && !loading;
@@ -54,7 +57,7 @@ export const SongsPage = memo(function SongsPage({
           />
           <SortSelect
             value={sort}
-            onChange={setSort}
+            onChange={onSortChange}
             fields={trackSortFields.map((key) => ({ key, label: t(`sort.field.${key}`) }))}
           />
           {/* The empty state already offers this action; showing it twice on one screen is noise. */}
@@ -78,7 +81,7 @@ export const SongsPage = memo(function SongsPage({
             onOpenTrack={handleOpenTrack}
             onChangeSelectedPaths={onChangeSelectedPaths}
             sort={sort}
-            onSortChange={setSort}
+            onSortChange={onSortChange}
           />
         )}
       </div>

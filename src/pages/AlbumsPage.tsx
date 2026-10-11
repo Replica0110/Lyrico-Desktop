@@ -1,6 +1,6 @@
 import { CheckOutlined, CheckSquareOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
 import { Button, Input, Typography } from "antd";
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import type { AudioTrack } from "../app/types";
 import { LibraryTable } from "../components/LibraryTable";
@@ -31,8 +31,10 @@ export const AlbumsPage = memo(function AlbumsPage({
   selectedCollectionKeys,
   onToggleCollection,
   selectionMode,
+  sort,
   onChangeSelectedPaths,
   onChangeSelectionMode,
+  onSortChange,
 }: {
   albums: AlbumGroup[];
   query: string;
@@ -48,11 +50,12 @@ export const AlbumsPage = memo(function AlbumsPage({
   selectedCollectionKeys: string[];
   onToggleCollection: (key: string, paths: string[]) => void;
   selectionMode: boolean;
+  sort?: SortState<AlbumSortField>;
   onChangeSelectedPaths: (paths: string[]) => void;
   onChangeSelectionMode: (enabled: boolean) => void;
+  onSortChange: (sort?: SortState<AlbumSortField>) => void;
 }) {
   const { t } = useTranslation();
-  const [sort, setSort] = useState<SortState<AlbumSortField>>();
   const sortedAlbums = useMemo(() => (sort ? sortAlbumsBy(albums, sort.key, sort.direction) : albums), [albums, sort]);
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumId);
   const { visibleCount, sentinelRef, hasMore } = useIncrementalGrid(sortedAlbums.length);
@@ -102,7 +105,7 @@ export const AlbumsPage = memo(function AlbumsPage({
           <Input allowClear className="page-search" prefix={<SearchOutlined />} placeholder={t("search.placeholder", { scope: t("search.albums") })} value={query} onChange={(event) => onChangeQuery(event.target.value)} />
           <SortSelect
             value={sort}
-            onChange={setSort}
+            onChange={onSortChange}
             fields={albumSortFields.map((key) => ({ key, label: t(`sort.field.${key}`) }))}
           />
           {selectionMode
