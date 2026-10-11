@@ -2,7 +2,7 @@ use std::sync::Mutex;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, Wry};
+use tauri::{AppHandle, Emitter, Manager, Wry};
 
 const TRAY_ID: &str = "lyrico";
 
@@ -55,7 +55,17 @@ pub(crate) fn init(app: &AppHandle) {
     });
 }
 
-/// 拦截主窗口关闭请求：开启「最小化到托盘」时隐藏窗口而不退出。
+/// 关闭主窗口时的处理方式。
+enum CloseDecision {
+    /// 允许正常关闭。
+    Allow,
+    /// 拦截关闭请求并隐藏到托盘。
+    Hide,
+    /// 拦截关闭请求，通知前端弹窗让用户选择。
+    Prompt,
+}
+
+/// 拦截主窗口关闭请求：未选择过时先弹窗询问，之后按「最小化到托盘」设置处理。
 pub(crate) fn intercept_close(app: &AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         return;
@@ -64,10 +74,17 @@ pub(crate) fn intercept_close(app: &AppHandle) {
     let handle = window.clone();
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-            if should_close_to_tray(&app) {
-                api.prevent_close();
-                if let Err(error) = handle.hide() {
-                    log_tray(log::Level::Warn, "window.hide.failed", error);
+            match close_decision(&app) {
+                CloseDecision::Allow => {}
+                CloseDecision::Hide => {
+                    api.prevent_close();
+                    if let Err(error) = handle.hide() {
+                        log_tray(log::Level::Warn, "window.hide.failed", error);
+                    }
+                }
+                CloseDecision::Prompt => {
+                    api.prevent_close();
+                    let _ = handle.emit("close-tray-prompt", ());
                 }
             }
         }
@@ -102,15 +119,25 @@ pub(crate) fn set_labels(app: &AppHandle, show: &str, quit: &str) -> Result<(), 
     icon.set_menu(Some(menu)).map_err(|error| error.to_string())
 }
 
-fn should_close_to_tray(app: &AppHandle) -> bool {
+fn close_decision(app: &AppHandle) -> CloseDecision {
     let tray_ready = app
         .try_state::<TrayState>()
         .map(|state| state.icon.is_some())
         .unwrap_or(false);
-    tray_ready
-        && crate::config::load_desktop_settings(app)
-            .map(|settings| settings.close_to_tray)
-            .unwrap_or(false)
+    if !tray_ready {
+        return CloseDecision::Allow;
+    }
+    match crate::config::load_desktop_settings(app) {
+        Ok(settings) if settings.close_to_tray_prompted => {
+            if settings.close_to_tray {
+                CloseDecision::Hide
+            } else {
+                CloseDecision::Allow
+            }
+        }
+        Ok(_) => CloseDecision::Prompt,
+        Err(_) => CloseDecision::Allow,
+    }
 }
 
 fn build_tray(app: &AppHandle, labels: &Labels) -> Result<TrayIcon<Wry>, String> {

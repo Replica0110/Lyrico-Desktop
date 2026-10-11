@@ -1,7 +1,7 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { App as AntApp, Button, ConfigProvider, Form, Spin, theme } from "antd";
+import { App as AntApp, Button, ConfigProvider, Form, Modal, Spin, theme } from "antd";
 import enUS from "antd/locale/en_US";
 import zhCN from "antd/locale/zh_CN";
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -103,6 +103,7 @@ const defaultDesktopSettings: DesktopSettings = {
   librarySorts: {},
   batchOperation: "replaygain",
   closeToTray: false,
+  closeToTrayPrompted: false,
   renameCharacterMappings: {
     "\\": "＼", "/": "／", ":": "：", "*": "＊", "?": "？", "\"": "＂", "<": "＜", ">": "＞", "|": "｜",
   },
@@ -264,6 +265,7 @@ function LyricoDesktop() {
   const [plugins, setPlugins] = useState<SourcePlugin[]>([]);
   const [artistSplitConfig, setArtistSplitConfig] = useState<ArtistSplitConfig>(defaultArtistSplitConfig);
   const [desktopSettings, setDesktopSettings] = useState<DesktopSettings>(defaultDesktopSettings);
+  const [closePromptOpen, setClosePromptOpen] = useState(false);
   const [languagePreference, setLanguagePreference] = useState<LanguagePreference>(getLanguagePreference);
   const [scanProgress, setScanProgress] = useState<ScanProgress>();
   const [form] = Form.useForm<TagForm>();
@@ -282,6 +284,22 @@ function LyricoDesktop() {
     void setTrayLabels(t("common.openMainWindow"), t("common.quit"))
       .catch(error => reportFrontendError("error", error, "tray.setLabels"));
   }, [t, i18n.resolvedLanguage]);
+  // 首次关闭主窗口时询问最小化到托盘还是直接关闭
+  useEffect(() => {
+    if (!isTauri()) return;
+    let disposed = false;
+    let unlisten: UnlistenFn | undefined;
+    void listen("close-tray-prompt", () => {
+      if (!disposed) setClosePromptOpen(true);
+    }).then((dispose) => {
+      if (disposed) dispose();
+      else unlisten = dispose;
+    }).catch(error => reportFrontendError("error", error, "close.trayPrompt.listen"));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
   const deferredQuery = useDeferredValue(query);
   const isSearchView = activeView === "songs" || activeView === "albums" || activeView === "artists";
   const [lyricMatchPaths, setLyricMatchPaths] = useState<Set<string>>(() => new Set());
@@ -973,6 +991,18 @@ function LyricoDesktop() {
       });
   }
 
+  // 记录用户对关闭方式的选择后重新发起关闭请求，由托盘拦截逻辑决定隐藏还是真正关闭
+  function resolveClosePrompt(toTray: boolean) {
+    const next = { ...desktopSettings, closeToTray: toTray, closeToTrayPrompted: true };
+    void saveDesktopSettings(next)
+      .then(() => {
+        setDesktopSettings(next);
+        setClosePromptOpen(false);
+        return getCurrentWindow().close();
+      })
+      .catch(error => message.error(String(error)));
+  }
+
   function changeLibrarySort(page: LibrarySortPage, sort?: LibrarySort) {
     const next = { ...desktopSettings.librarySorts };
     if (sort) next[page] = sort;
@@ -1188,6 +1218,19 @@ function LyricoDesktop() {
     </Shell>
       </AppErrorBoundary>
     <AppContextMenu onNavigate={changeView} />
+    <Modal
+      title={t("common.closePrompt.title")}
+      open={closePromptOpen}
+      closable={false}
+      keyboard={false}
+      maskClosable={false}
+      footer={[
+        <Button key="close" onClick={() => resolveClosePrompt(false)}>{t("common.closePrompt.close")}</Button>,
+        <Button key="tray" type="primary" onClick={() => resolveClosePrompt(true)}>{t("common.closePrompt.tray")}</Button>,
+      ]}
+    >
+      {t("common.closePrompt.description")}
+    </Modal>
     </>
   );
 }

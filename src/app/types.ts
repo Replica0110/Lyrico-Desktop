@@ -147,6 +147,7 @@ export type DesktopSettings = {
   librarySorts: Partial<Record<LibrarySortPage, LibrarySort>>;
   batchOperation: string;
   closeToTray: boolean;
+  closeToTrayPrompted: boolean;
 };
 
 export type LibrarySortPage = "songs" | "albums" | "artists" | "folders";

@@ -38,6 +38,7 @@ pub(crate) struct DesktopSettings {
     pub(crate) library_sorts: BTreeMap<String, LibrarySort>,
     pub(crate) batch_operation: String,
     pub(crate) close_to_tray: bool,
+    pub(crate) close_to_tray_prompted: bool,
 }
 
 /// 列表页排序偏好：key/direction 的取值合法性由前端校验（字段清单只在前端维护）。
@@ -97,6 +98,7 @@ impl Default for DesktopSettings {
             library_sorts: BTreeMap::new(),
             batch_operation: "replaygain".to_string(),
             close_to_tray: false,
+            close_to_tray_prompted: false,
         }
     }
 }

@@ -41,7 +41,13 @@
     "reorderPosition": "{{name}}, position {{position}} of {{total}}",
     "delete": "Delete",
     "openMainWindow": "Open main window",
-    "quit": "Quit"
+    "quit": "Quit",
+    "closePrompt": {
+      "title": "Choose close behavior",
+      "description": "When the window is closed, minimize it to the tray and keep running in the background, or close the app? You can change this later in Settings.",
+      "tray": "Minimize to tray",
+      "close": "Close the app"
+    }
   },
   "nav": {
     "library": "Library",
