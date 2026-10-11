@@ -151,7 +151,7 @@ fn build_menu(app: &AppHandle, labels: &Labels) -> Result<Menu<Wry>, String> {
     Menu::with_items(app, &[&show_item, &quit_item]).map_err(|error| error.to_string())
 }
 
-fn show_main_window(app: &AppHandle) {
+pub(crate) fn show_main_window(app: &AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
