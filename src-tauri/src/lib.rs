@@ -14,6 +14,7 @@ mod plugins;
 mod remote_image;
 mod replay_gain;
 mod taglib_bridge;
+mod tray;
 
 use batch::BatchManager;
 use commands::{
@@ -27,8 +28,8 @@ use commands::{
     remove_library_folder, reorder_plugin_sources, report_frontend_error, retry_failed_batch_items,
     save_artist_split_config, save_audio_tags, save_desktop_settings, save_source_plugin_settings,
     scan_folder, search_lyrics_lines, set_plugin_source_enabled, set_source_plugin_enabled,
-    set_source_plugin_order, start_batch_task, uninstall_source_plugin, upsert_library_folder,
-    write_image_file, write_text_file,
+    set_source_plugin_order, set_tray_labels, start_batch_task, uninstall_source_plugin,
+    upsert_library_folder, write_image_file, write_text_file,
 };
 use database::Database;
 use lyrics_commands::{
@@ -86,6 +87,8 @@ pub fn run() {
                 .batch_manager
                 .recover(app.handle().clone());
             startup.finish(&Ok::<(),String>(()));
+            tray::init(&app.handle());
+            tray::intercept_close(&app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -130,6 +133,7 @@ pub fn run() {
             reorder_plugin_sources,
             set_source_plugin_enabled,
             set_source_plugin_order,
+            set_tray_labels,
             save_source_plugin_settings,
             uninstall_source_plugin,
             invoke_source_plugin,

@@ -104,6 +104,10 @@ export async function saveDesktopSettings(settings: DesktopSettings) {
 
 export type ThemeMode = "system" | "light" | "dark";
 
+export async function setTrayLabels(show: string, quit: string) {
+  return invoke<void>("set_tray_labels", { show, quit });
+}
+
 export async function exportConfig(destination: string) {
   return invoke<void>("export_config", { destination });
 }

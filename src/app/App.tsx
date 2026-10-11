@@ -38,6 +38,7 @@ import {
   pickPaths,
   pickSavePath,
   uninstallSourcePlugin,
+  setTrayLabels,
 } from "../backend/audioApi";
 import { useBlockMouseSideButtons } from "../hooks/useGoUpOnMouseBack";
 import { useLibrarySelection } from "../hooks/useLibrarySelection";
@@ -98,6 +99,7 @@ const defaultDesktopSettings: DesktopSettings = {
   editFieldVisibility: {},
   editCustomTags: [],
   editFieldOrder: ["basic", "track", "credits", "customTags", "replaygain", "lyrics", "cover"],
+  closeToTray: false,
   renameCharacterMappings: {
     "\\": "＼", "/": "／", ":": "：", "*": "＊", "?": "？", "\"": "＂", "<": "＜", ">": "＞", "|": "｜",
   },
@@ -249,6 +251,12 @@ function LyricoDesktop() {
   useEffect(() => {
     editingPathRef.current = detailTrack?.path;
   }, [detailTrack]);
+  // 托盘右键菜单文案跟随界面语言
+  useEffect(() => {
+    if (!isTauri()) return;
+    void setTrayLabels(t("common.openMainWindow"), t("common.quit"))
+      .catch(error => reportFrontendError("error", error, "tray.setLabels"));
+  }, [t, i18n.resolvedLanguage]);
   const deferredQuery = useDeferredValue(query);
   const isSearchView = activeView === "songs" || activeView === "albums" || activeView === "artists";
   const [lyricMatchPaths, setLyricMatchPaths] = useState<Set<string>>(() => new Set());

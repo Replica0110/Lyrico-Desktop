@@ -1165,6 +1165,19 @@ pub(crate) fn save_desktop_settings(
 }
 
 #[tauri::command]
+pub(crate) fn set_tray_labels(app: AppHandle, show: String, quit: String) -> Result<(), String> {
+    let operation = crate::logging::Operation::new(
+        "tray",
+        "set_tray_labels",
+        serde_json::json!({}),
+        log::Level::Debug,
+    );
+    let result = (|| crate::tray::set_labels(&app, &show, &quit))();
+    operation.finish(&result);
+    result
+}
+
+#[tauri::command]
 pub(crate) async fn export_config(
     app: AppHandle,
     state: State<'_, AppState>,

@@ -39,7 +39,9 @@
     "reorderItem": "Reorder {{name}}",
     "reorderHint": "Drag to reorder; focus and press Space to pick up, arrow keys to move, Space to drop",
     "reorderPosition": "{{name}}, position {{position}} of {{total}}",
-    "delete": "Delete"
+    "delete": "Delete",
+    "openMainWindow": "Open main window",
+    "quit": "Quit"
   },
   "nav": {
     "library": "Library",

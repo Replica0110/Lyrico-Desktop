@@ -35,6 +35,7 @@ pub(crate) struct DesktopSettings {
     pub(crate) edit_field_visibility: BTreeMap<String, bool>,
     pub(crate) edit_field_order: Vec<String>,
     pub(crate) edit_custom_tags: Vec<String>,
+    pub(crate) close_to_tray: bool,
 }
 
 pub(crate) const EDIT_FIELD_KEYS: &[&str] = &[
@@ -83,6 +84,7 @@ impl Default for DesktopSettings {
             edit_field_visibility: BTreeMap::new(),
             edit_field_order: default_edit_field_order(),
             edit_custom_tags: Vec::new(),
+            close_to_tray: false,
         }
     }
 }
@@ -114,10 +116,13 @@ pub(crate) fn save_desktop_settings(
     settings: DesktopSettings,
 ) -> Result<(), String> {
     let settings = normalize_settings(settings);
+    let close_to_tray = settings.close_to_tray;
     let mut config = load_config(app)?;
     config.schema_version = CONFIG_SCHEMA_VERSION;
     config.settings = settings;
-    write_json(&resolve_data_paths(app)?.settings, &config)
+    write_json(&resolve_data_paths(app)?.settings, &config)?;
+    crate::tray::sync_visibility(app, close_to_tray);
+    Ok(())
 }
 
 fn normalize_settings(mut settings: DesktopSettings) -> DesktopSettings {
@@ -393,7 +398,9 @@ pub(crate) fn import_config(
         settings: backup.settings,
     };
     config.settings = normalize_settings(config.settings);
+    let close_to_tray = config.settings.close_to_tray;
     write_json(&resolve_data_paths(app)?.settings, &config)?;
+    crate::tray::sync_visibility(app, close_to_tray);
     Ok((load_desktop_settings(app)?, backup.plugins))
 }
 

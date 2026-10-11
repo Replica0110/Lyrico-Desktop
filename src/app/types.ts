@@ -144,6 +144,7 @@ export type DesktopSettings = {
   editFieldVisibility: Record<string, boolean>;
   editFieldOrder: string[];
   editCustomTags: string[];
+  closeToTray: boolean;
 };
 
 export type LyricLineTrack = "original" | "translation" | "romanization";

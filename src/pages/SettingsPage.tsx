@@ -86,6 +86,7 @@ export function SettingsPage({
                       ]}
                     />
                   </SettingRow>
+                  <SettingRow title={t("settings.closeToTray")} description={t("settings.closeToTrayHint")}><Switch checked={settings.closeToTray} onChange={(value) => update("closeToTray", value)} /></SettingRow>
                 </SettingsSection>
               ),
             },
