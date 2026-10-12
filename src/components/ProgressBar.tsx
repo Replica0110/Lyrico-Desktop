@@ -1,6 +1,6 @@
 /**
  * The one progress bar. Both the global scan/replay-gain strips and in-panel progress use it,
- * so a bare percentage is never the only signal. See docs/ui-layout.md §5.
+ * so a bare percentage is never the only signal. See docs/ui-layout.md.
  *
  * `indeterminate` covers work that reports no meaningful percentage yet (for example a single
  * track analysis, which only reports 0 then 100): the track shows motion instead of an empty bar.

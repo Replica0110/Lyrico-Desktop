@@ -71,7 +71,7 @@ function findScrollParent(element: HTMLElement) {
  * selecting a range and Ctrl+Shift adding a range.
  * With the list focused, arrows select one row, Shift+arrows extend the range,
  * Ctrl+arrows move the cursor, Space toggles it, and Ctrl+A selects this list.
- * See docs/ui-layout.md section 7.
+ * See docs/ui-layout.md (song selection and navigation).
  */
 export const LibraryTable = memo(function LibraryTable({ tracks, loading, selectedPaths = [], onOpenTrack, onChangeSelectedPaths, sort, onSortChange }: {
   tracks: AudioTrack[];

@@ -6,7 +6,7 @@ export type SubPagePathItem = { key: string; label: ReactNode; onClick?: () => v
 
 /**
  * The only second-level page bar: back target + real path + actions for this level.
- * It replaces the page header, it does not stack under it. See docs/ui-layout.md section 4.
+ * It replaces the page header, it does not stack under it. See docs/ui-layout.md.
  */
 export function SubPageBar({ backLabel, onBack, items, actions, label, children }: {
   backLabel: string;

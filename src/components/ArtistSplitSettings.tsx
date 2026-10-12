@@ -20,7 +20,7 @@ type RuleItem = { id: string; value: string; enabled: boolean };
  * type a value and press Enter (or 添加) to append a row; a row can be edited in place,
  * switched off without deleting, or removed. Values are stored exactly as typed — a separator
  * such as " feat. " keeps its spaces — and every change goes through the shared validators.
- * See docs/ui-layout.md §9.6.
+ * See docs/ui-layout.md (settings).
  */
 function RuleListEditor({ items, ariaLabel, placeholder, compact = false, validate, onChange, onReject }: {
   items: RuleItem[];

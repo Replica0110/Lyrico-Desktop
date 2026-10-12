@@ -27,7 +27,7 @@ type PluginsPageProps = {
 
 /**
  * Installed plugins: fixed list rail on the left (drag to change priority),
- * detail of the selected plugin on the right. See docs/ui-layout.md §9.3.
+ * detail of the selected plugin on the right. See docs/ui-layout.md.
  */
 export function PluginsPage({ mutationBusy, plugins, onInstall, onChangeEnabled, onSaveConfig, onUninstall, onMoveOrder }: PluginsPageProps) {
   const { t } = useTranslation();

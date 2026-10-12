@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 /**
- * One bordered surface with a fixed header row. See docs/ui-layout.md section 5.
+ * One bordered surface with a fixed header row. See docs/ui-layout.md.
  * Never nest a Panel inside a Panel.
  */
 export function Panel({ title, extra, children, className, bodyClassName }: {

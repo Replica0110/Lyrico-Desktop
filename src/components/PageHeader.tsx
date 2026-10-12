@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 /**
  * The only page header in the app: one row, title + page-scoped reading + actions.
  * The title is a plain element on purpose: antd's Typography scale must not leak into
- * the shared header geometry (see docs/ui-layout.md section 3).
+ * the shared header geometry (see docs/ui-layout.md).
  */
 export function PageHeader({ title, meta, actions, children }: {
   title: ReactNode;

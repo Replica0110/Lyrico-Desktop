@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 /**
  * The only empty state: one factual line plus at most one next action.
- * No illustration, no encouragement. See docs/ui-layout.md section 5.
+ * No illustration, no encouragement. See docs/ui-layout.md.
  */
 export function EmptyState({ description, action }: { description: ReactNode; action?: ReactNode }) {
   return (

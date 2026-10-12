@@ -26,7 +26,7 @@ import { formatTimeValue } from "../utils/format";
  * Folders: the library root list, and the folder contents as a second-level page.
  * The root list is one row per folder (icon, name, real path, track count, hover actions).
  * Entering a folder replaces the whole page with SubPageBar + the shared song table.
- * See docs/ui-layout.md sections 3, 4, 5 and 9.2.
+ * See docs/ui-layout.md (page structure and song selection).
  */
 export const FoldersPage = memo(function FoldersPage({
   folders,
