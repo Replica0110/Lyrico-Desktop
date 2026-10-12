@@ -86,7 +86,17 @@ export function SettingsPage({
                       ]}
                     />
                   </SettingRow>
-                  <SettingRow title={t("settings.closeToTray")} description={t("settings.closeToTrayHint")}><Switch checked={settings.closeToTray} onChange={(value) => onChangeSettings({ ...settings, closeToTray: value, closeToTrayPrompted: true })} /></SettingRow>
+                  <SettingRow title={t("settings.closeToTray")}>
+                    <Select<"tray" | "quit">
+                      aria-label={t("settings.closeToTray")}
+                      value={settings.closeToTray ? "tray" : "quit"}
+                      onSelect={value => onChangeSettings({ ...settings, closeToTray: value === "tray", closeToTrayPrompted: true })}
+                      options={[
+                        { value: "tray", label: t("common.closePrompt.tray") },
+                        { value: "quit", label: t("common.closePrompt.close") },
+                      ]}
+                    />
+                  </SettingRow>
                 </SettingsSection>
               ),
             },

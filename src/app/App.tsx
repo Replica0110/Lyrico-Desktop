@@ -1,7 +1,7 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { App as AntApp, Button, ConfigProvider, Form, Modal, Spin, theme } from "antd";
+import { App as AntApp, Button, ConfigProvider, Form, Spin, theme } from "antd";
 import enUS from "antd/locale/en_US";
 import zhCN from "antd/locale/zh_CN";
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -41,6 +41,7 @@ import {
   setTrayLabels,
 } from "../backend/audioApi";
 import { useBlockMouseSideButtons } from "../hooks/useGoUpOnMouseBack";
+import { CloseBehaviorDialog } from "../components/CloseBehaviorDialog";
 import { useLibrarySelection } from "../hooks/useLibrarySelection";
 import { AppErrorBoundary } from "../components/AppErrorBoundary";
 import { reportFrontendError } from "../backend/diagnostics";
@@ -138,6 +139,8 @@ function normalizeDesktopSettings(stored: unknown): DesktopSettings {
     const value = merged[key];
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       merged[key] = { ...(defaultDesktopSettings[key] as Record<string, unknown>) };
+    } else {
+      merged[key] = { ...value };
     }
   }
   if (typeof merged.artistPosterFolder !== "string") merged.artistPosterFolder = defaultDesktopSettings.artistPosterFolder;
@@ -265,6 +268,9 @@ function LyricoDesktop() {
   const [plugins, setPlugins] = useState<SourcePlugin[]>([]);
   const [artistSplitConfig, setArtistSplitConfig] = useState<ArtistSplitConfig>(defaultArtistSplitConfig);
   const [desktopSettings, setDesktopSettings] = useState<DesktopSettings>(defaultDesktopSettings);
+  const desktopSettingsRef = useRef(desktopSettings);
+  const settingsLoad = useRef<Promise<void>>(Promise.resolve());
+  desktopSettingsRef.current = desktopSettings;
   const [closePromptOpen, setClosePromptOpen] = useState(false);
   const [languagePreference, setLanguagePreference] = useState<LanguagePreference>(getLanguagePreference);
   const [scanProgress, setScanProgress] = useState<ScanProgress>();
@@ -399,8 +405,14 @@ function LyricoDesktop() {
   }, [artists, desktopSettings.artistPosterFolder]);
 
   useEffect(() => {
-    Promise.all([loadLibraryFolders(), loadLibraryTracks(), loadArtistSplitConfig(), loadSourcePlugins(), loadDesktopSettings()])
-      .then(([storedFolders, storedTracks, storedArtistSplitConfig, storedPlugins, storedSettings]) => {
+    settingsLoad.current = loadDesktopSettings().then(stored => {
+      const next = normalizeDesktopSettings(stored);
+      desktopSettingsRef.current = next;
+      setDesktopSettings(next);
+    });
+    void settingsLoad.current.catch(error => reportFrontendError("error", error, "settings.load"));
+    Promise.all([loadLibraryFolders(), loadLibraryTracks(), loadArtistSplitConfig(), loadSourcePlugins()])
+      .then(([storedFolders, storedTracks, storedArtistSplitConfig, storedPlugins]) => {
         setFolders(deduplicateFolders(storedFolders));
         setTracks(storedTracks);
         setSelectedFolderPath(storedFolders[0]?.path);
@@ -408,13 +420,11 @@ function LyricoDesktop() {
         setSelectedPaths([]);
         setArtistSplitConfig(storedArtistSplitConfig);
         setPlugins(storedPlugins);
-        setDesktopSettings(normalizeDesktopSettings(storedSettings));
       })
       .catch(() => {
         setFolders([]);
         setTracks([]);
         setPlugins([]);
-        setDesktopSettings(defaultDesktopSettings);
       });
   }, []);
 
@@ -983,6 +993,7 @@ function LyricoDesktop() {
   }
 
   function changeDesktopSettings(settings: DesktopSettings) {
+    desktopSettingsRef.current = settings;
     setDesktopSettings(settings);
     settingsSaveQueue.current = settingsSaveQueue.current
       .then(() => saveDesktopSettings(settings))
@@ -993,14 +1004,19 @@ function LyricoDesktop() {
 
   // 记录用户对关闭方式的选择后重新发起关闭请求，由托盘拦截逻辑决定隐藏还是真正关闭
   function resolveClosePrompt(toTray: boolean) {
-    const next = { ...desktopSettings, closeToTray: toTray, closeToTrayPrompted: true };
-    void saveDesktopSettings(next)
-      .then(() => {
-        setDesktopSettings(next);
+    const saved = settingsSaveQueue.current.then(() => settingsLoad.current).then(async () => {
+      const next = { ...desktopSettingsRef.current, closeToTray: toTray, closeToTrayPrompted: true };
+      await saveDesktopSettings(next);
+      desktopSettingsRef.current = next;
+      setDesktopSettings(next);
+    });
+    // Keep the queue usable after a failure; the dialog reports this save's error.
+    settingsSaveQueue.current = saved.catch(() => undefined);
+    return saved
+      .then(async () => {
+        await getCurrentWindow().close();
         setClosePromptOpen(false);
-        return getCurrentWindow().close();
-      })
-      .catch(error => message.error(String(error)));
+      });
   }
 
   function changeLibrarySort(page: LibrarySortPage, sort?: LibrarySort) {
@@ -1218,19 +1234,11 @@ function LyricoDesktop() {
     </Shell>
       </AppErrorBoundary>
     <AppContextMenu onNavigate={changeView} />
-    <Modal
-      title={t("common.closePrompt.title")}
+    <CloseBehaviorDialog
       open={closePromptOpen}
-      closable={false}
-      keyboard={false}
-      maskClosable={false}
-      footer={[
-        <Button key="close" onClick={() => resolveClosePrompt(false)}>{t("common.closePrompt.close")}</Button>,
-        <Button key="tray" type="primary" onClick={() => resolveClosePrompt(true)}>{t("common.closePrompt.tray")}</Button>,
-      ]}
-    >
-      {t("common.closePrompt.description")}
-    </Modal>
+      onCancel={() => setClosePromptOpen(false)}
+      onConfirm={resolveClosePrompt}
+    />
     </>
   );
 }

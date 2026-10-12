@@ -43,10 +43,10 @@
     "openMainWindow": "Open main window",
     "quit": "Quit",
     "closePrompt": {
-      "title": "Choose close behavior",
-      "description": "When the window is closed, minimize it to the tray and keep running in the background, or close the app? You can change this later in Settings.",
+      "title": "When closing the window",
+      "description": "You can change this in Settings.",
       "tray": "Minimize to tray",
-      "close": "Close the app"
+      "close": "Quit application"
     }
   },
   "nav": {

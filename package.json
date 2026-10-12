@@ -7,7 +7,6 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "test": "vitest run",
     "preview": "vite preview",
     "tauri": "tauri"
   },
@@ -34,7 +33,6 @@
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^6.0.2",
     "typescript": "~6.0.3",
-    "vite": "^8.0.16",
-    "vitest": "^4.1.10"
+    "vite": "^8.0.16"
   }
 }

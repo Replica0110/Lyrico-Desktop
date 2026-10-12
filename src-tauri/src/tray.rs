@@ -78,13 +78,24 @@ pub(crate) fn intercept_close(app: &AppHandle) {
                 CloseDecision::Allow => {}
                 CloseDecision::Hide => {
                     api.prevent_close();
+                    // Never hide the only window without a working way to restore it.
+                    if let Some(state) = app.try_state::<TrayState>() {
+                        if let Some(icon) = &state.icon {
+                            if let Err(error) = icon.set_visible(true) {
+                                log_tray(log::Level::Warn, "tray.visible.failed", error);
+                                return;
+                            }
+                        }
+                    }
                     if let Err(error) = handle.hide() {
                         log_tray(log::Level::Warn, "window.hide.failed", error);
                     }
                 }
                 CloseDecision::Prompt => {
                     api.prevent_close();
-                    let _ = handle.emit("close-tray-prompt", ());
+                    if let Err(error) = handle.emit("close-tray-prompt", ()) {
+                        log_tray(log::Level::Warn, "close.prompt.failed", error);
+                    }
                 }
             }
         }
@@ -124,19 +135,25 @@ fn close_decision(app: &AppHandle) -> CloseDecision {
         .try_state::<TrayState>()
         .map(|state| state.icon.is_some())
         .unwrap_or(false);
-    if !tray_ready {
-        return CloseDecision::Allow;
-    }
     match crate::config::load_desktop_settings(app) {
-        Ok(settings) if settings.close_to_tray_prompted => {
-            if settings.close_to_tray {
-                CloseDecision::Hide
-            } else {
-                CloseDecision::Allow
-            }
+        Ok(settings) => decide_close(tray_ready, &settings),
+        Err(error) => {
+            log_tray(log::Level::Warn, "settings.load.failed", error);
+            CloseDecision::Allow
         }
-        Ok(_) => CloseDecision::Prompt,
-        Err(_) => CloseDecision::Allow,
+    }
+}
+
+fn decide_close(tray_ready: bool, settings: &crate::config::DesktopSettings) -> CloseDecision {
+    if !tray_ready {
+        CloseDecision::Allow
+    } else if settings.close_to_tray {
+        // Preserve tray preferences from builds predating the first-close prompt.
+        CloseDecision::Hide
+    } else if settings.close_to_tray_prompted {
+        CloseDecision::Allow
+    } else {
+        CloseDecision::Prompt
     }
 }
 

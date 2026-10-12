@@ -38,10 +38,10 @@
     "openMainWindow": "打开主界面",
     "quit": "退出",
     "closePrompt": {
-      "title": "选择关闭方式",
-      "description": "关闭窗口时是最小化到托盘继续在后台运行，还是直接关闭应用？之后可以在设置中随时修改",
+      "title": "关闭窗口时",
+      "description": "可在设置中更改",
       "tray": "最小化到托盘",
-      "close": "直接关闭"
+      "close": "退出应用"
     }
   },
   "nav": {

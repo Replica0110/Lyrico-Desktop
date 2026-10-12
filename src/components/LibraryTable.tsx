@@ -10,11 +10,10 @@ import {
   useState,
   type HTMLAttributes,
   type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
 import type { AudioTrack } from "../app/types";
-import { selectLibraryByKey, selectLibraryRow, type LibrarySelectionKey } from "../domain/librarySelection";
+import { selectLibraryByKey, selectLibraryCheckbox, type LibrarySelectionClick, type LibrarySelectionKey } from "../domain/librarySelection";
 import { sortTracksBy, type SortState, type TrackSortField } from "../domain/sort";
 import { formatDuration, formatTimestamp } from "../utils/format";
 import { TrackArtwork } from "./TrackArtwork";
@@ -68,10 +67,10 @@ function findScrollParent(element: HTMLElement) {
 }
 
 /**
- * The one song table. A plain row click opens the editor; selection is data on the
- * always-present first-column checkbox (Ctrl toggles, Shift extends).
+ * Rows open the editor; the first-column checkbox toggles selection, with Shift
+ * selecting a range and Ctrl+Shift adding a range.
  * With the list focused, arrows select one row, Shift+arrows extend the range,
- * Ctrl+arrows move the cursor, and Ctrl+A selects every visible row.
+ * Ctrl+arrows move the cursor, Space toggles it, and Ctrl+A selects this list.
  * See docs/ui-layout.md section 7.
  */
 export const LibraryTable = memo(function LibraryTable({ tracks, loading, selectedPaths = [], onOpenTrack, onChangeSelectedPaths, sort, onSortChange }: {
@@ -85,11 +84,11 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
 }) {
   const { t } = useTranslation();
   const [internalSort, setInternalSort] = useState<SortState<TrackSortField>>();
-  const activeSort = sort ?? internalSort;
+  const activeSort = onSortChange ? sort : internalSort;
   const applySort = useCallback((next?: SortState<TrackSortField>) => {
-    if (sort === undefined || next === undefined) setInternalSort(next);
+    if (!onSortChange) setInternalSort(next);
     onSortChange?.(next);
-  }, [sort, onSortChange]);
+  }, [onSortChange]);
   const sortedTracks = useMemo(
     () => (activeSort ? sortTracksBy(tracks, activeSort.key, activeSort.direction) : tracks),
     [tracks, activeSort],
@@ -154,6 +153,7 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
   const trackPaths = useMemo(() => sortedTracks.map((track) => track.path), [sortedTracks]);
   const anchorRef = useRef<number | null>(null);
   const cursorRef = useRef<number | null>(null);
+  const previousPathsRef = useRef(trackPaths);
   const [cursorIndex, setCursorIndex] = useState<number | null>(null);
   const selectedPathsRef = useRef(selectedPaths);
   const sortedTracksRef = useRef(sortedTracks);
@@ -164,9 +164,25 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
   onChangeSelectedPathsRef.current = onChangeSelectedPaths;
   onOpenTrackRef.current = onOpenTrack;
 
+  useLayoutEffect(() => {
+    const previous = previousPathsRef.current;
+    const rebase = (index: number | null) => {
+      if (index === null) return null;
+      const next = trackPaths.indexOf(previous[index]);
+      return next < 0 ? null : next;
+    };
+    anchorRef.current = rebase(anchorRef.current);
+    cursorRef.current = rebase(cursorRef.current);
+    setCursorIndex(cursorRef.current);
+    previousPathsRef.current = trackPaths;
+  }, [trackPaths]);
+
   const changeSelection = useCallback((next: string[], anchor: number | null) => {
     anchorRef.current = anchor;
-    onChangeSelectedPathsRef.current?.(next);
+    if (next !== selectedPathsRef.current) {
+      selectedPathsRef.current = next;
+      onChangeSelectedPathsRef.current?.(next);
+    }
   }, []);
 
   const rememberCursor = useCallback((index: number) => {
@@ -174,21 +190,9 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
     setCursorIndex(index);
   }, []);
 
-  const toggleTrack = useCallback((track: AudioTrack, index: number) => {
-    const current = selectedPathsRef.current;
-    rememberCursor(index);
-    changeSelection(
-      current.includes(track.path) ? current.filter((path) => path !== track.path) : [...current, track.path],
-      index,
-    );
-  }, [changeSelection, rememberCursor]);
-
-  const selectRow = useCallback((event: ReactMouseEvent<HTMLElement>, track: AudioTrack, index: number) => {
-    if (!onChangeSelectedPathsRef.current) {
-      onOpenTrackRef.current(track);
-      return;
-    }
-    const result = selectLibraryRow(
+  const selectCheckbox = useCallback((index: number, event: LibrarySelectionClick) => {
+    if (!onChangeSelectedPathsRef.current) return;
+    const result = selectLibraryCheckbox(
       sortedTracksRef.current.map((item) => item.path),
       selectedPathsRef.current,
       anchorRef.current,
@@ -197,14 +201,13 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
     );
     rememberCursor(index);
     changeSelection(result.selectedPaths, result.anchorIndex);
-    hostRef.current?.focus({ preventScroll: true });
   }, [changeSelection, rememberCursor]);
 
   const onListKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.altKey || event.nativeEvent.isComposing) return;
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
-    if (target.closest("textarea, select, [contenteditable='true'], .ant-table-thead")) return;
+    if (target.closest("textarea, select, button, a, [role='button'], [contenteditable='true'], .ant-table-thead")) return;
     if (target instanceof HTMLInputElement && target.type !== "checkbox") return;
 
     if (event.key === "Enter") {
@@ -219,8 +222,10 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
     const moveKey = libraryMoveKey(event.key);
     if (!moveKey) return;
     if (moveKey === "a" && (!(event.ctrlKey || event.metaKey) || event.shiftKey)) return;
-    event.preventDefault();
     if (!onChangeSelectedPathsRef.current) return;
+    // Consume recognized selection keys even at the first/last row: do not scroll
+    // the page or let a still-focused checkbox toggle a different cursor item.
+    event.preventDefault();
 
     const result = selectLibraryByKey(
       sortedTracksRef.current.map((item) => item.path),
@@ -230,21 +235,16 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
       { key: moveKey, shiftKey: event.shiftKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey },
     );
     if (!result) return;
-    event.preventDefault();
-    anchorRef.current = result.anchorIndex;
     rememberCursor(result.cursorIndex);
-    if (result.selectedPaths !== selectedPathsRef.current) {
-      onChangeSelectedPathsRef.current(result.selectedPaths);
-    }
+    changeSelection(result.selectedPaths, result.anchorIndex);
+    // Virtual rows can unmount on scrolling; keep focus on the stable list host.
+    hostRef.current?.focus({ preventScroll: true });
     tableRef.current?.scrollTo({ index: result.cursorIndex });
-  }, [rememberCursor]);
+  }, [rememberCursor, changeSelection]);
 
-  const onRow = useCallback((track: AudioTrack, index = 0): HTMLAttributes<HTMLElement> => ({
-    onClick: (event) => {
-      if (event.shiftKey || event.ctrlKey || event.metaKey) selectRow(event, track, index);
-      else onOpenTrackRef.current(track);
-    },
-  }), [selectRow]);
+  const onRow = useCallback((track: AudioTrack): HTMLAttributes<HTMLElement> => ({
+    onClick: () => onOpenTrackRef.current(track),
+  }), []);
 
   const allSelected = sortedTracks.length > 0 && sortedTracks.every((track) => selectedSet.has(track.path));
   const someSelected = !allSelected && sortedTracks.some((track) => selectedSet.has(track.path));
@@ -271,7 +271,7 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
             aria-label={t("selection.selectAll")}
             checked={allSelected}
             indeterminate={someSelected}
-            disabled={sortedTracks.length === 0}
+            disabled={sortedTracks.length === 0 || !onChangeSelectedPaths}
             onChange={() => changeSelection(allSelected ? [] : trackPaths, null)}
           />
         ),
@@ -281,8 +281,10 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
           <Checkbox
             aria-label={t("selection.selectRow", { name: track.title || track.fileName })}
             checked={selectedSet.has(track.path)}
-            onClick={(event) => event.stopPropagation()}
-            onChange={() => toggleTrack(track, index)}
+            disabled={!onChangeSelectedPaths}
+            onFocus={() => rememberCursor(index)}
+            onClick={event => event.stopPropagation()}
+            onChange={event => selectCheckbox(index, event.nativeEvent)}
           />
         ),
       },
@@ -360,7 +362,7 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
     }
 
     return list;
-  }, [t, activeSort, layout, selectedSet, toggleTrack, changeSelection, allSelected, someSelected, trackPaths, sortedTracks.length]);
+  }, [t, activeSort, layout, selectedSet, selectCheckbox, rememberCursor, changeSelection, allSelected, someSelected, trackPaths, sortedTracks.length, onChangeSelectedPaths]);
 
   const handleTableChange = useCallback<NonNullable<TableProps<AudioTrack>["onChange"]>>(
     (_pagination, _filters, sorter) => {
@@ -417,5 +419,6 @@ export const LibraryTable = memo(function LibraryTable({ tracks, loading, select
 function libraryMoveKey(key: string): LibrarySelectionKey | null {
   if (key === "ArrowUp" || key === "ArrowDown" || key === "Home" || key === "End") return key;
   if (key === "a" || key === "A") return "a";
+  if (key === " ") return " ";
   return null;
 }
