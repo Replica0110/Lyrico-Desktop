@@ -126,7 +126,7 @@ export function BatchTrackTable<T extends { path?: string; originalPath?: string
   const itemMap = useMemo(() => batchItemMap(items), [items]);
   useEffect(() => setFilter("all"), [task?.taskId]);
   const data = (props.dataSource ?? []).filter(row => filter === "all" || itemMap.get(row.path ?? row.originalPath ?? "")?.status === filter);
-  return <>
+  return <div className="batch-track-table">
     {task && <div className="batch-result-filter">
       <Select aria-label={t("tasks.resultFilter")} value={filter} onChange={setFilter} options={["all", "running", "queued", "succeeded", "skipped", "failed", "cancelled"].map(value => ({ value, label: t(value === "all" ? "tasks.allResults" : `tasks.status.${value}`) }))} />
       <span className="batch-secondary">{t("tasks.visibleCount", { count: data.length })}</span>
@@ -136,5 +136,5 @@ export function BatchTrackTable<T extends { path?: string; originalPath?: string
       ...(props.columns ?? []),
       { title: t("tasks.itemResult"), key: "result", width: 150, render: (_, row) => <BatchItemResult item={itemMap.get(row.path ?? row.originalPath ?? "")} /> },
     ]} locale={{ emptyText: <EmptyState description={t(filter === "all" ? "tasks.noSelection" : "tasks.noResults")} /> }} />
-  </>;
+  </div>;
 }

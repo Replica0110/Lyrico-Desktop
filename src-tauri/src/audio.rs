@@ -38,7 +38,6 @@ fn track_from_file(
         ArtworkMode::None => None,
         ArtworkMode::Full => file.cover()?,
     };
-    let title = text(&tags, "TITLE");
     Ok(AudioTrack {
         id: path.to_string_lossy().into_owned(),
         path: path.to_string_lossy().into_owned(),
@@ -47,14 +46,7 @@ fn track_from_file(
             .unwrap_or_default()
             .to_string_lossy()
             .into_owned(),
-        title: if title.trim().is_empty() {
-            path.file_stem()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned()
-        } else {
-            title
-        },
+        title: text(&tags, "TITLE"),
         artist: joined(&tags, "ARTIST", artist_separator),
         album: text(&tags, "ALBUM"),
         album_artist: joined(&tags, "ALBUMARTIST", artist_separator),
