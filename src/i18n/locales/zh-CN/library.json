@@ -25,6 +25,7 @@
     "search": "搜索已选歌曲"
   },
   "songs": {
+    "refreshLibrary": "刷新音乐库",
     "noResults": "没有匹配的歌曲",
     "clearSearch": "清除搜索",
     "title": "歌曲",

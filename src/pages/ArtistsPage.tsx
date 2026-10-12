@@ -3,6 +3,7 @@ import { Button, Input, Typography } from "antd";
 import { memo, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { LibraryTable } from "../components/LibraryTable";
+import { LibraryRefreshButton } from "../components/LibraryRefreshButton";
 import { PageHeader } from "../components/PageHeader";
 import { SortSelect } from "../components/SortSelect";
 import { SubPageBar } from "../components/SubPageBar";
@@ -21,6 +22,8 @@ export const ArtistsPage = memo(function ArtistsPage({
   selectedArtistId,
   detailsOpen,
   loading,
+  onRefreshLibrary,
+  canRefreshLibrary,
   onChangeQuery,
   onSelectArtist,
   onOpenTrack,
@@ -41,6 +44,8 @@ export const ArtistsPage = memo(function ArtistsPage({
   selectedArtistId?: string;
   detailsOpen: boolean;
   loading: boolean;
+  onRefreshLibrary: () => void;
+  canRefreshLibrary: boolean;
   onChangeQuery: (query: string) => void;
   onSelectArtist: (artistId?: string) => void;
   onOpenTrack: (path: string) => void;
@@ -109,6 +114,7 @@ export const ArtistsPage = memo(function ArtistsPage({
             onChange={onSortChange}
             fields={artistSortFields.map((key) => ({ key, label: t(`sort.field.${key}`) }))}
           />
+          <LibraryRefreshButton disabled={!canRefreshLibrary || loading} onRefresh={onRefreshLibrary} />
           {selectionMode
             ? <Button icon={<CloseOutlined />} onClick={() => onChangeSelectionMode(false)}>{t("selection.exit")}</Button>
             : <Button icon={<CheckSquareOutlined />} onClick={() => onChangeSelectionMode(true)}>{t("selection.selectArtists")}</Button>}

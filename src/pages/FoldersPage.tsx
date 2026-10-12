@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 import type { AudioTrack, LibraryFolder } from "../app/types";
 import { EmptyState } from "../components/EmptyState";
 import { LibraryTable } from "../components/LibraryTable";
+import { LibraryRefreshButton } from "../components/LibraryRefreshButton";
 import { PageHeader } from "../components/PageHeader";
 import { SortSelect } from "../components/SortSelect";
 import { SubPageBar } from "../components/SubPageBar";
@@ -33,6 +34,7 @@ export const FoldersPage = memo(function FoldersPage({
   tracks,
   loading,
   onAddFolders,
+  onRefreshLibrary,
   onRescanFolder,
   onRemoveFolder,
   hiddenFolderPaths,
@@ -48,6 +50,7 @@ export const FoldersPage = memo(function FoldersPage({
   tracks: AudioTrack[];
   loading: boolean;
   onAddFolders: () => void;
+  onRefreshLibrary: () => void;
   onRescanFolder: (path: string) => void;
   onRemoveFolder: (path: string) => void;
   hiddenFolderPaths: string[];
@@ -200,6 +203,7 @@ export const FoldersPage = memo(function FoldersPage({
                 fields={folderSortFields.map((key) => ({ key, label: t(`sort.field.${key}`) }))}
               />
               {/* The empty state already offers this action; showing it twice on one screen is noise. */}
+              <LibraryRefreshButton disabled={folders.length === 0 || loading} onRefresh={onRefreshLibrary} />
               {noFolderMatch || roots.length ? addFolderButton : null}
             </>
           }

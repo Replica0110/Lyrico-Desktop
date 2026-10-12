@@ -68,6 +68,13 @@ pub(crate) struct TrackCover {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct LibraryTrackUpdate {
+    pub(crate) previous_path: String,
+    pub(crate) track: Option<AudioTrack>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ReplayGainAnalysis {
     pub(crate) job_id: String,
     pub(crate) path: String,

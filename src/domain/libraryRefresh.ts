@@ -2,6 +2,14 @@ import type { AudioTrack, BatchTaskItem } from "../app/types";
 
 const unchangedTaskTypes = new Set(["exportLyrics", "exportCover"]);
 
+export type LibraryTrackUpdate = { previousPath: string; track?: AudioTrack | null };
+
+export function applyLibraryTrackUpdate(current: AudioTrack[], update: LibraryTrackUpdate) {
+  return current.flatMap((track) => normalizePath(track.path) === normalizePath(update.previousPath)
+    ? update.track ? [update.track] : []
+    : [track]);
+}
+
 export function libraryPathsToRefresh(taskType: string, items: BatchTaskItem[]) {
   if (unchangedTaskTypes.has(taskType) || taskType === "deleteFiles") return [];
   return succeededItems(items).flatMap((item) => {

@@ -2,7 +2,7 @@ use super::manager::{build_pool, ActiveBatchTask};
 use super::processor::{processor_for, ProcessContext, ProcessError};
 use crate::config;
 use crate::database::Database;
-use crate::models::{BatchTask, BatchTaskItem};
+use crate::models::{BatchTask, BatchTaskItem, LibraryTrackUpdate};
 use rayon::prelude::*;
 use serde_json::Value;
 use std::sync::atomic::Ordering;
@@ -204,6 +204,26 @@ fn process_item(
                     Some(failure),
                 );
                 return;
+            }
+            // Publish only committed library data, without embedded cover bytes.
+            // The terminal task event remains a fallback for missed item events.
+            if let Some(track) = outcome.updated_track.as_ref() {
+                match tauri::async_runtime::block_on(database.load_tracks_by_paths(&[track.path.clone()])) {
+                    Ok(tracks) => {
+                        if let Some(track) = tracks.into_iter().next() {
+                            let _ = app.emit("library-track-updated", LibraryTrackUpdate {
+                                previous_path: item.song_path.clone(),
+                                track: Some(track),
+                            });
+                        }
+                    }
+                    Err(error) => log::warn!("Batch library update could not be published: {error}"),
+                }
+            } else if task.task_type == "deleteFiles" {
+                let _ = app.emit("library-track-updated", LibraryTrackUpdate {
+                    previous_path: item.song_path.clone(),
+                    track: None,
+                });
             }
             update_item(
                 app,

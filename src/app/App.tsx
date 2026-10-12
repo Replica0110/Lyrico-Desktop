@@ -58,7 +58,7 @@ import { completeTagForm, splitGenreValues } from "../domain/tagForm";
 import { filterHiddenCustomTagEdits } from "../domain/editFieldSettings";
 import { detectLyricsFormat } from "../backend/lyricsApi";
 import { invalidateCachedCovers, updateCachedCover } from "../hooks/useTrackCovers";
-import { applyBatchLibraryUpdate, libraryPathsToRefresh } from "../domain/libraryRefresh";
+import { applyBatchLibraryUpdate, applyLibraryTrackUpdate, libraryPathsToRefresh, type LibraryTrackUpdate } from "../domain/libraryRefresh";
 import {
   getLanguagePreference,
   resolveLanguage,
@@ -277,6 +277,7 @@ function LyricoDesktop() {
   const [form] = Form.useForm<TagForm>();
   const detailRequest = useRef(0);
   const activeFolderScans = useRef(new Set<string>());
+  const staleDetailPaths = useRef(new Set<string>());
   const folderScanQueue = useRef<Promise<void>>(Promise.resolve());
   const editingPathRef = useRef<string | undefined>(undefined);
   const artistSplitSaveQueue = useRef<Promise<void>>(Promise.resolve());
@@ -431,6 +432,28 @@ function LyricoDesktop() {
   useEffect(() => {
     let disposed = false;
     let unlisten: UnlistenFn | undefined;
+    void listen<LibraryTrackUpdate>("library-track-updated", ({ payload }) => {
+      if (disposed) return;
+      staleDetailPaths.current.add(normalizePath(payload.previousPath));
+      invalidateCachedCovers([payload.previousPath, ...(payload.track ? [payload.track.path] : [])]);
+      setTracks((current) => applyLibraryTrackUpdate(current, payload));
+      const nextPath = payload.track?.path;
+      setSelectedPath((current) => current && samePath(current, payload.previousPath) ? nextPath : current);
+      setSelectedPaths((current) => current.flatMap((path) => samePath(path, payload.previousPath) ? nextPath ? [nextPath] : [] : [path]));
+      // A batch update must not replace an editor draft; reopening reads the saved file.
+      if (!nextPath || !samePath(nextPath, payload.previousPath)) {
+        setDetailTrack((current) => current && samePath(current.path, payload.previousPath) ? undefined : current);
+      }
+    }).then((dispose) => {
+      if (disposed) dispose();
+      else unlisten = dispose;
+    }).catch((error) => reportFrontendError("error", error, "library.listen"));
+    return () => { disposed = true; unlisten?.(); };
+  }, [setSelectedPaths]);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: UnlistenFn | undefined;
     const finished = notifiedTasks.current;
     void listen<BatchTask>("batch-task-updated", ({ payload }) => {
       if (!disposed && ["succeeded", "failed", "cancelled"].includes(payload.status)) {
@@ -451,6 +474,7 @@ function LyricoDesktop() {
           const refreshPaths = libraryPathsToRefresh(payload.taskType, items);
           const refreshed = refreshPaths.length ? await loadLibraryTracksByPaths(refreshPaths) : [];
           if (disposed) return;
+          for (const path of refreshPaths) staleDetailPaths.current.add(normalizePath(path));
           if (payload.taskType !== "exportLyrics" && payload.taskType !== "exportCover") {
             invalidateCachedCovers([
               ...items.filter((item) => item.status === "succeeded").map((item) => item.songPath),
@@ -473,7 +497,7 @@ function LyricoDesktop() {
           setSelectedPath((current) => current ? renamedPaths.get(normalizePath(current)) ?? current : current);
           setSelectedPaths((current) => current.map((path) => renamedPaths.get(normalizePath(path)) ?? path));
           setDetailTrack((current) => current && renamedPaths.has(normalizePath(current.path)) ? undefined : current);
-        }).catch(() => undefined);
+        }).catch((error) => reportFrontendError("error", error, "library.batchRefresh"));
       }
     }).then((dispose) => {
       if (disposed) dispose();
@@ -559,7 +583,12 @@ function LyricoDesktop() {
     for (const path of newPaths) await scanAndMergeFolder(path);
   }
 
-  async function scanAndMergeFolder(path: string) {
+  async function refreshLibrary() {
+    if (activeFolderScans.current.size > 0) return;
+    for (const folder of deduplicateFolders(folders)) await scanAndMergeFolder(folder.path, false);
+  }
+
+  async function scanAndMergeFolder(path: string, selectFolder = true) {
     const scanKey = folderPathKey(path);
     if (activeFolderScans.current.has(scanKey)) return;
     activeFolderScans.current.add(scanKey);
@@ -570,11 +599,13 @@ function LyricoDesktop() {
       try {
         const folderTracks = await scanFolder(path);
         const scannedAt = new Date().toISOString();
+        for (const track of folderTracks) staleDetailPaths.current.add(normalizePath(track.path));
+        invalidateCachedCovers(folderTracks.map((track) => track.path));
         setTracks((current) => mergeFolderTracks(current, folderTracks, path));
         setFolders((current) =>
           upsertFolder(current, { path, trackCount: folderTracks.length, status: "ready", lastScannedAt: scannedAt }),
         );
-        setSelectedFolderPath(path);
+        if (selectFolder) setSelectedFolderPath(path);
         setSelectedPath((current) => current ?? folderTracks[0]?.path);
         notification.success({ title: t("scanProgress.phase.completed"), description: t("messages.scanned", { count: folderTracks.length }) });
       } catch (error) {
@@ -604,9 +635,10 @@ function LyricoDesktop() {
     setSelectedPath(path);
     setDetailsMounted(true);
     setDetailsOpen(true);
-    if (detailTrack?.path === path) return;
+    if (detailTrack?.path === path && !staleDetailPaths.current.has(normalizePath(path))) return;
 
     const requestId = ++detailRequest.current;
+    staleDetailPaths.current.delete(normalizePath(path));
     setDetailTrack(undefined);
     setDetailsLoading(true);
     try {
@@ -619,6 +651,7 @@ function LyricoDesktop() {
         setDetailCustomTags(customTags);
       }
     } catch (error) {
+      staleDetailPaths.current.add(normalizePath(path));
       if (requestId === detailRequest.current) message.error(String(error));
     } finally {
       if (requestId === detailRequest.current) setDetailsLoading(false);
@@ -871,6 +904,7 @@ function LyricoDesktop() {
   function replaceTrack(value: unknown) {
     const nextTrack = asAudioTrack(value);
     if (!nextTrack) return undefined;
+    staleDetailPaths.current.delete(normalizePath(nextTrack.path));
     setTracks((current) => current.map((track) => (samePath(track.path, nextTrack.path) ? nextTrack : track)));
     updateCachedCover(nextTrack.path, nextTrack.coverDataUrl);
     return nextTrack;
@@ -1062,6 +1096,8 @@ function LyricoDesktop() {
       case "albums":
         return (
           <AlbumsPage
+            onRefreshLibrary={refreshLibrary}
+            canRefreshLibrary={folders.length > 0}
             selectedCollectionKeys={selectedCollectionKeys}
             onToggleCollection={onToggleCollection}
             albums={albums}
@@ -1085,6 +1121,8 @@ function LyricoDesktop() {
       case "artists":
         return (
           <ArtistsPage
+            onRefreshLibrary={refreshLibrary}
+            canRefreshLibrary={folders.length > 0}
             selectedCollectionKeys={selectedCollectionKeys}
             onToggleCollection={onToggleCollection}
             artists={artists}
@@ -1109,6 +1147,7 @@ function LyricoDesktop() {
       case "folders":
         return (
           <FoldersPage
+            onRefreshLibrary={refreshLibrary}
             folders={folders}
             tracks={tracks}
             loading={loading}
@@ -1166,6 +1205,8 @@ function LyricoDesktop() {
         return (
           <SongsPage
             onAddFolders={addFolders}
+            onRefreshLibrary={refreshLibrary}
+            canRefreshLibrary={folders.length > 0}
             tracks={filteredTracks}
             query={query}
             selectedPaths={selectedPaths}

@@ -316,7 +316,7 @@ textarea {
 /* Search is the only flexible control in a header: it shrinks before anything wraps,
    so the header stays one row down to the minimum supported window (720px). */
 .page-search {
-  flex: 1 1 160px;
+  flex: 1 1 120px;
   min-width: 120px;
   max-width: 280px;
 }

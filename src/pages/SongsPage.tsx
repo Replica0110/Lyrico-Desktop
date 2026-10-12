@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import type { AudioTrack } from "../app/types";
 import { EmptyState } from "../components/EmptyState";
 import { LibraryTable } from "../components/LibraryTable";
+import { LibraryRefreshButton } from "../components/LibraryRefreshButton";
 import { PageHeader } from "../components/PageHeader";
 import { SortSelect } from "../components/SortSelect";
 import { trackSortFields, type SortState, type TrackSortField } from "../domain/sort";
@@ -20,6 +21,8 @@ export const SongsPage = memo(function SongsPage({
   onSortChange,
   onOpenDetails,
   onAddFolders,
+  onRefreshLibrary,
+  canRefreshLibrary,
 }: {
   tracks: AudioTrack[];
   query: string;
@@ -31,6 +34,8 @@ export const SongsPage = memo(function SongsPage({
   onSortChange: (sort?: SortState<TrackSortField>) => void;
   onOpenDetails: (path?: string) => void;
   onAddFolders: () => void;
+  onRefreshLibrary: () => void;
+  canRefreshLibrary: boolean;
 }) {
   const { t } = useTranslation();
   const handleOpenTrack = useCallback((track: AudioTrack) => onOpenDetails(track.path), [onOpenDetails]);
@@ -60,6 +65,7 @@ export const SongsPage = memo(function SongsPage({
             onChange={onSortChange}
             fields={trackSortFields.map((key) => ({ key, label: t(`sort.field.${key}`) }))}
           />
+          <LibraryRefreshButton disabled={!canRefreshLibrary || loading} onRefresh={onRefreshLibrary} />
           {/* The empty state already offers this action; showing it twice on one screen is noise. */}
           {empty && !searching ? null : addFolderAction}
         </>}

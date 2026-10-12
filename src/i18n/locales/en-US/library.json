@@ -26,6 +26,7 @@
     "search": "Search selected songs"
   },
   "songs": {
+    "refreshLibrary": "Refresh library",
     "noResults": "No matching songs",
     "clearSearch": "Clear search",
     "title": "Songs",
