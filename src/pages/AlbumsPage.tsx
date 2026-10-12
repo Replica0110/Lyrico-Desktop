@@ -1,5 +1,5 @@
-import { CheckOutlined, CheckSquareOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
-import { Button, Input, Typography } from "antd";
+import { SearchOutlined } from "@ant-design/icons";
+import { Input, Typography } from "antd";
 import { memo, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import type { AudioTrack } from "../app/types";
@@ -13,6 +13,7 @@ import type { AlbumGroup } from "../domain/library";
 import { albumSortFields, sortAlbumsBy, type AlbumSortField, type SortState } from "../domain/sort";
 import { formatDuration } from "../utils/format";
 import { useGoUpOnMouseBack } from "../hooks/useGoUpOnMouseBack";
+import { IncrementalGridFooter } from "../components/IncrementalGridFooter";
 import { useIncrementalGrid } from "../hooks/useIncrementalGrid";
 
 const { Text } = Typography;
@@ -31,12 +32,8 @@ export const AlbumsPage = memo(function AlbumsPage({
   onOpenDetails,
   onCloseDetails,
   selectedPaths,
-  selectedCollectionKeys,
-  onToggleCollection,
-  selectionMode,
   sort,
   onChangeSelectedPaths,
-  onChangeSelectionMode,
   onSortChange,
 }: {
   albums: AlbumGroup[];
@@ -52,18 +49,14 @@ export const AlbumsPage = memo(function AlbumsPage({
   onOpenDetails: () => void;
   onCloseDetails: () => void;
   selectedPaths: string[];
-  selectedCollectionKeys: string[];
-  onToggleCollection: (key: string, paths: string[]) => void;
-  selectionMode: boolean;
   sort?: SortState<AlbumSortField>;
   onChangeSelectedPaths: (paths: string[]) => void;
-  onChangeSelectionMode: (enabled: boolean) => void;
   onSortChange: (sort?: SortState<AlbumSortField>) => void;
 }) {
   const { t } = useTranslation();
   const sortedAlbums = useMemo(() => (sort ? sortAlbumsBy(albums, sort.key, sort.direction) : albums), [albums, sort]);
+  const { visibleCount, sentinelRef, hasMore, loadingMore } = useIncrementalGrid(sortedAlbums.length);
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumId);
-  const { visibleCount, sentinelRef, hasMore } = useIncrementalGrid(sortedAlbums.length);
   useGoUpOnMouseBack(detailsOpen && selectedAlbum !== undefined, onCloseDetails);
 
   if (detailsOpen && selectedAlbum) {
@@ -114,30 +107,19 @@ export const AlbumsPage = memo(function AlbumsPage({
             fields={albumSortFields.map((key) => ({ key, label: t(`sort.field.${key}`) }))}
           />
           <LibraryRefreshButton disabled={!canRefreshLibrary || loading} onRefresh={onRefreshLibrary} />
-          {selectionMode
-            ? <Button icon={<CloseOutlined />} onClick={() => onChangeSelectionMode(false)}>{t("selection.exit")}</Button>
-            : <Button icon={<CheckSquareOutlined />} onClick={() => onChangeSelectionMode(true)}>{t("selection.selectAlbums")}</Button>}
         </>}
       />
       <div className="page-body">
         <div className="album-grid" aria-busy={loading}>
-          {sortedAlbums.slice(0, visibleCount).map((album) => {
-            const selected = selectedCollectionKeys.includes(`album:${album.id}`);
-            return <button className="collection-tile album-tile" key={album.id} aria-pressed={selectionMode ? selected : undefined} onClick={() => {
-              if (selectionMode) onToggleCollection(`album:${album.id}`, album.tracks.map((track) => track.path));
-              else { onSelectAlbum(album.id); onOpenDetails(); }
-            }}>
-              <div className="collection-artwork-wrap">
-                <TrackArtwork track={{ coverDataUrl: album.coverDataUrl, path: album.coverPath, hasCover: Boolean(album.coverPath) }} size={180} />
-                {selectionMode ? <span className={`collection-select-indicator${selected ? " is-selected" : ""}`}><CheckOutlined /></span> : null}
-              </div>
-              <Text strong ellipsis={{ tooltip: album.title }}>{album.title}</Text>
-              <Text type="secondary" ellipsis={{ tooltip: album.artist }}>{album.artist}</Text>
-              <Text className="collection-meta" type="secondary"><span>{t("common.trackCount", { count: album.trackCount })}</span><span>{formatDuration(album.durationSeconds)}</span></Text>
-            </button>;
-          })}
+          {sortedAlbums.slice(0, visibleCount).map(album => <button type="button" className="collection-tile album-tile" key={album.id}
+            onClick={() => { onSelectAlbum(album.id); onOpenDetails(); }}>
+            <span className="collection-artwork-wrap"><TrackArtwork track={{ coverDataUrl: album.coverDataUrl, path: album.coverPath, hasCover: Boolean(album.coverPath) }} size={180} /></span>
+            <Text strong ellipsis={{ tooltip: album.title }}>{album.title}</Text>
+            <Text type="secondary" ellipsis={{ tooltip: album.artist }}>{album.artist}</Text>
+            <Text className="collection-meta" type="secondary"><span>{t("common.trackCount", { count: album.trackCount })}</span><span>{formatDuration(album.durationSeconds)}</span></Text>
+          </button>)}
         </div>
-        {hasMore ? <div ref={sentinelRef} className="collection-grid-sentinel" aria-hidden="true" /> : null}
+        <IncrementalGridFooter sentinelRef={sentinelRef} hasMore={hasMore} loadingMore={loadingMore} />
       </div>
     </div>
   );

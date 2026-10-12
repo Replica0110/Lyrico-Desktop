@@ -1,36 +1,19 @@
 import { CustomerServiceOutlined } from "@ant-design/icons";
 import { Avatar } from "antd";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo } from "react";
 import type { AudioTrack } from "../app/types";
 import { useImageDimensions } from "../hooks/useImageDimensions";
 import { useTrackCover } from "../hooks/useTrackCovers";
+import { useNearViewport } from "../hooks/useNearViewport";
+import { useArtistPoster } from "../hooks/useArtistPoster";
 
 type ArtworkTrack = Pick<AudioTrack, "coverDataUrl"> & Partial<Pick<AudioTrack, "path" | "hasCover">>;
 
-export const TrackArtwork = memo(function TrackArtwork({ track, size, showDimensions = false }: { track?: ArtworkTrack; size: number; showDimensions?: boolean }) {
-  const containerRef = useRef<HTMLSpanElement>(null);
-  const [nearViewport, setNearViewport] = useState(false);
-  useEffect(() => {
-    const element = containerRef.current;
-    if (!element || nearViewport || track?.coverDataUrl || !track?.path || !track.hasCover) return;
-    if (typeof IntersectionObserver === "undefined") {
-      setNearViewport(true);
-      return;
-    }
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setNearViewport(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: "240px" },
-    );
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [nearViewport, track?.coverDataUrl, track?.hasCover, track?.path]);
+export const TrackArtwork = memo(function TrackArtwork({ track, size, showDimensions = false, posterFolder = "", artist = "" }: { track?: ArtworkTrack; size: number; showDimensions?: boolean; posterFolder?: string; artist?: string }) {
+  const { ref: containerRef, nearViewport } = useNearViewport(JSON.stringify([track?.path, posterFolder, artist]), !track?.coverDataUrl);
+  const poster = useArtistPoster(posterFolder, artist, nearViewport);
   const lazyCover = useTrackCover(track?.path, nearViewport && Boolean(track?.hasCover), size > 128);
-  const coverDataUrl = track?.coverDataUrl ?? lazyCover;
+  const coverDataUrl = track?.coverDataUrl ?? poster ?? lazyCover;
   const dimensions = useImageDimensions(showDimensions ? coverDataUrl : undefined);
 
   if (coverDataUrl) {

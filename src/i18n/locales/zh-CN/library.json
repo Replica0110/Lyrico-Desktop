@@ -1,4 +1,7 @@
 {
+  "library": {
+    "loadingMore": "正在加载更多"
+  },
   "scanProgress": {
     "phase": {
       "enumerating": "正在发现音频文件",
@@ -10,9 +13,6 @@
   },
   "selection": {
     "enter": "选择歌曲",
-    "selectAlbums": "选择专辑",
-    "selectArtists": "选择艺术家",
-    "exit": "退出多选",
     "count": "已选择 {{count}} 首歌曲",
     "batch": "批量处理",
     "showSelected": "查看已选择歌曲",

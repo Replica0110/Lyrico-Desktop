@@ -446,6 +446,20 @@ pub(crate) fn read_image_data_url(path: &Path) -> Result<String, String> {
     let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
     Ok(cover_data_url(&validated_picture(bytes)?))
 }
+pub(crate) fn read_image_preview(path: &Path, max_size: u32) -> Result<String, String> {
+    let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+    let image = image::load_from_memory(&bytes).map_err(|error| error.to_string())?;
+    let size = max_size.clamp(1, 1024);
+    let preview = image.thumbnail(size, size).to_rgb8();
+    let mut encoded = Vec::new();
+    JpegEncoder::new_with_quality(&mut encoded, 88)
+        .encode_image(&preview)
+        .map_err(|error| error.to_string())?;
+    Ok(format!(
+        "data:image/jpeg;base64,{}",
+        general_purpose::STANDARD.encode(encoded)
+    ))
+}
 pub(crate) fn write_image_data_url(path: &Path, data_url: &str) -> Result<(), String> {
     let cover = picture_from_data_url(data_url)?;
     if let Some(parent) = path.parent() {

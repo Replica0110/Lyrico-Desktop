@@ -1,6 +1,6 @@
 use crate::audio::{
-    is_audio_path, read_cover_artwork, read_cover_thumbnail, read_image_data_url, read_track,
-    save_tags, write_image_data_url, ArtworkMode,
+    is_audio_path, read_cover_artwork, read_cover_thumbnail, read_image_data_url, read_image_preview,
+    read_track, save_tags, write_image_data_url, ArtworkMode,
 };
 use crate::batch::{generate_rename_previews, CharacterMappingRule, RenamePreview};
 use crate::config as app_config;
@@ -845,6 +845,7 @@ pub(crate) async fn read_image_file(
     app: AppHandle,
     state: State<'_, AppState>,
     path: String,
+    max_size: Option<u32>,
 ) -> Result<String, String> {
     let operation = crate::logging::Operation::new(
         "files",
@@ -854,7 +855,10 @@ pub(crate) async fn read_image_file(
     );
     let result = async {
         path_access::ensure_allowed(&app, &state, Path::new(&path)).await?;
-        tauri::async_runtime::spawn_blocking(move || read_image_data_url(Path::new(&path)))
+        tauri::async_runtime::spawn_blocking(move || match max_size {
+            Some(size) => read_image_preview(Path::new(&path), size),
+            None => read_image_data_url(Path::new(&path)),
+        })
             .await
             .map_err(|error| error.to_string())?
     }

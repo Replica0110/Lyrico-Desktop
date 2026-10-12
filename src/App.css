@@ -805,8 +805,13 @@ textarea {
 }
 
 .collection-grid-sentinel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   width: 100%;
-  height: 1px;
+  height: 36px;
+  color: var(--ant-color-text-secondary);
 }
 
 .selection-page{
@@ -830,49 +835,25 @@ textarea {
   aspect-ratio: 1;
 }
 
-.collection-artwork-wrap > span:not(.collection-select-indicator),
+.collection-artwork-wrap > span,
 .collection-artwork-wrap .ant-avatar {
   width: 100% !important;
   height: 100% !important;
 }
 
-.album-tile .collection-artwork-wrap > span:not(.collection-select-indicator),
-.album-tile .collection-artwork-wrap .ant-avatar {
+.album-grid .collection-artwork-wrap > span,
+.album-grid .collection-artwork-wrap .ant-avatar {
   border-radius: var(--surface-radius);
 }
 
-.artist-tile {
+.artist-grid .collection-tile {
   align-items: center;
   text-align: center;
 }
 
-.artist-tile .collection-artwork-wrap > span:not(.collection-select-indicator),
-.artist-tile .collection-artwork-wrap .ant-avatar {
+.artist-grid .collection-artwork-wrap > span,
+.artist-grid .collection-artwork-wrap .ant-avatar {
   border-radius: 50%;
-}
-
-.collection-select-indicator {
-  position: absolute;
-  z-index: 2;
-  top: 8px;
-  right: 8px;
-  display: grid;
-  width: 24px;
-  height: 24px;
-  box-sizing: border-box;
-  border: 1px solid rgba(255, 255, 255, 0.92);
-  border-radius: 50%;
-  color: transparent;
-  background: rgba(20, 24, 32, 0.38);
-  font-size: 12px;
-  place-items: center;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-}
-
-.collection-select-indicator.is-selected {
-  border-color: var(--ant-color-primary);
-  color: #fff;
-  background: var(--ant-color-primary);
 }
 
 .collection-meta {

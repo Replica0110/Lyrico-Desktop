@@ -1,4 +1,7 @@
 {
+  "library": {
+    "loadingMore": "Loading more"
+  },
   "scanProgress": {
     "phase": {
       "enumerating": "Discovering audio files",
@@ -10,9 +13,6 @@
   },
   "selection": {
     "enter": "Select songs",
-    "selectAlbums": "Select albums",
-    "selectArtists": "Select artists",
-    "exit": "Exit selection",
     "count_one": "1 song selected",
     "count_other": "{{count}} songs selected",
     "batch": "Batch process",

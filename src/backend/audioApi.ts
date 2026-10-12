@@ -36,8 +36,8 @@ export async function loadLibraryCustomTagKeys() {
   return invoke<{ keys: string[]; unreadable: number }>("load_library_custom_tag_keys");
 }
 
-export async function readImageFile(path: string) {
-  return invoke<string>("read_image_file", { path });
+export async function readImageFile(path: string, maxSize?: number) {
+  return invoke<string>("read_image_file", { path, maxSize });
 }
 
 export async function readTextFile(path: string) {

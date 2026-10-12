@@ -42,7 +42,6 @@ import {
 } from "../backend/audioApi";
 import { useBlockMouseSideButtons } from "../hooks/useGoUpOnMouseBack";
 import { CloseBehaviorDialog } from "../components/CloseBehaviorDialog";
-import { useLibrarySelection } from "../hooks/useLibrarySelection";
 import { AppErrorBoundary } from "../components/AppErrorBoundary";
 import { reportFrontendError } from "../backend/diagnostics";
 import { Shell } from "../components/Shell";
@@ -58,6 +57,7 @@ import { completeTagForm, splitGenreValues } from "../domain/tagForm";
 import { filterHiddenCustomTagEdits } from "../domain/editFieldSettings";
 import { detectLyricsFormat } from "../backend/lyricsApi";
 import { invalidateCachedCovers, updateCachedCover } from "../hooks/useTrackCovers";
+import { invalidateArtistPosters } from "../hooks/useArtistPoster";
 import { applyBatchLibraryUpdate, applyLibraryTrackUpdate, libraryPathsToRefresh, type LibraryTrackUpdate } from "../domain/libraryRefresh";
 import {
   getLanguagePreference,
@@ -75,7 +75,6 @@ import { getThemeMode, prefersDark, setThemeMode, subscribeTheme } from "./theme
 import type { ThemeMode } from "../backend/audioApi";
 import { isPathInHiddenFolder } from "../domain/libraryVisibility";
 import { deduplicateFolders, folderPathKey, upsertFolder } from "../domain/libraryFolders";
-import { artistPosterBaseNames } from "../domain/artistPoster";
 import { shareFile } from "@sosweetham/tauri-plugin-sharehub-api";
 import { fileUrlForShare } from "../domain/share";
 import "../App.css";
@@ -250,8 +249,7 @@ function LyricoDesktop() {
   const [tracks, setTracks] = useState<AudioTrack[]>([]);
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [selectedPath, setSelectedPath] = useState<string>();
-  const { selectedPaths, setSelectedPaths, selectedCollectionKeys, onToggleCollection } = useLibrarySelection();
-  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [selectedFolderPath, setSelectedFolderPath] = useState<string>();
   const [selectedAlbumId, setSelectedAlbumId] = useState<string>();
   const [selectedArtistId, setSelectedArtistId] = useState<string>();
@@ -326,7 +324,7 @@ function LyricoDesktop() {
     () => (activeView === "artists" ? groupArtists(filteredTracks, artistSplitConfig) : []),
     [activeView, filteredTracks, artistSplitConfig],
   );
-  const [artistPosters, setArtistPosters] = useState<Record<string, string>>({});
+  useEffect(() => { invalidateArtistPosters(); }, [tracks, desktopSettings.artistPosterFolder]);
   const trackByPath = useMemo(() => {
     const map = new Map<string, AudioTrack>();
     for (const track of tracks) map.set(track.path, track);
@@ -374,36 +372,6 @@ function LyricoDesktop() {
       window.clearTimeout(timer);
     };
   }, [deferredQuery, isSearchView, desktopSettings.lyricIndexEnabled]);
-
-  useEffect(() => {
-    const folder = (desktopSettings.artistPosterFolder ?? "").trim();
-    if (!folder || artists.length === 0) {
-      setArtistPosters({});
-      return;
-    }
-    let disposed = false;
-    void Promise.all(
-      artists.map(async (artist) => {
-        for (const base of artistPosterBaseNames(artist.name)) {
-          for (const extension of ["jpg", "jpeg", "png", "webp"]) {
-            try {
-              const dataUrl = await readImageFile(`${folder}\\${base}.${extension}`);
-              return [artist.id, dataUrl] as const;
-            } catch {
-              // Try the next supported filename variant.
-            }
-          }
-        }
-        return undefined;
-      }),
-    ).then((entries) => {
-      if (disposed) return;
-      setArtistPosters(Object.fromEntries(entries.filter((entry): entry is readonly [string, string] => Boolean(entry))));
-    });
-    return () => {
-      disposed = true;
-    };
-  }, [artists, desktopSettings.artistPosterFolder]);
 
   useEffect(() => {
     settingsLoad.current = loadDesktopSettings().then(stored => {
@@ -713,11 +681,6 @@ function LyricoDesktop() {
     }
   }
 
-  const changeSelectionMode = useCallback(function changeSelectionMode(enabled: boolean) {
-    setSelectedPaths([]);
-    setSelectionMode(enabled);
-  }, []);
-
   const onChangeQuery = useCallback(setQuery, []);
   const onChangeSelectedPaths = useCallback(setSelectedPaths, []);
 
@@ -906,7 +869,7 @@ function LyricoDesktop() {
     if (!nextTrack) return undefined;
     staleDetailPaths.current.delete(normalizePath(nextTrack.path));
     setTracks((current) => current.map((track) => (samePath(track.path, nextTrack.path) ? nextTrack : track)));
-    updateCachedCover(nextTrack.path, nextTrack.coverDataUrl);
+    updateCachedCover(nextTrack.path);
     return nextTrack;
   }
 
@@ -1087,7 +1050,6 @@ function LyricoDesktop() {
     setDetailsOpen(false);
     setAlbumDetailsOpen(false);
     setArtistDetailsOpen(false);
-    setSelectionMode(false);
     setActiveView(view);
   }, []);
 
@@ -1098,8 +1060,6 @@ function LyricoDesktop() {
           <AlbumsPage
             onRefreshLibrary={refreshLibrary}
             canRefreshLibrary={folders.length > 0}
-            selectedCollectionKeys={selectedCollectionKeys}
-            onToggleCollection={onToggleCollection}
             albums={albums}
             query={query}
             selectedAlbumId={selectedAlbumId}
@@ -1111,9 +1071,7 @@ function LyricoDesktop() {
             onOpenDetails={onAlbumOpenDetails}
             onCloseDetails={onAlbumCloseDetails}
             selectedPaths={selectedPaths}
-            selectionMode={selectionMode}
             onChangeSelectedPaths={onChangeSelectedPaths}
-            onChangeSelectionMode={changeSelectionMode}
             sort={desktopSettings.librarySorts.albums as SortState<AlbumSortField> | undefined}
             onSortChange={(sort) => changeLibrarySort("albums", sort)}
           />
@@ -1123,8 +1081,6 @@ function LyricoDesktop() {
           <ArtistsPage
             onRefreshLibrary={refreshLibrary}
             canRefreshLibrary={folders.length > 0}
-            selectedCollectionKeys={selectedCollectionKeys}
-            onToggleCollection={onToggleCollection}
             artists={artists}
             query={query}
             selectedArtistId={selectedArtistId}
@@ -1136,10 +1092,8 @@ function LyricoDesktop() {
             onOpenDetails={onArtistOpenDetails}
             onCloseDetails={onArtistCloseDetails}
             selectedPaths={selectedPaths}
-            selectionMode={selectionMode}
             onChangeSelectedPaths={onChangeSelectedPaths}
-            onChangeSelectionMode={changeSelectionMode}
-            artistPosters={artistPosters}
+            artistPosterFolder={desktopSettings.artistPosterFolder}
             sort={desktopSettings.librarySorts.artists as SortState<ArtistSortField> | undefined}
             onSortChange={(sort) => changeLibrarySort("artists", sort)}
           />
