@@ -58,11 +58,25 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
         tray::show_main_window(app);
     }));
+    #[cfg(desktop)]
+    let window_state_flags = tauri_plugin_window_state::StateFlags::SIZE
+        | tauri_plugin_window_state::StateFlags::POSITION
+        | tauri_plugin_window_state::StateFlags::MAXIMIZED;
+    #[cfg(desktop)]
+    let builder = builder.plugin(
+        tauri_plugin_window_state::Builder::default()
+            // Tray hiding must not make the next launch start with an invisible window.
+            .with_state_flags(window_state_flags)
+            .with_filter(|label| label == "main")
+            // Restore explicitly while hidden, then show after setup finishes.
+            .skip_initial_state("main")
+            .build(),
+    );
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_sharehub::init())
-        .setup(|app| {
+        .setup(move |app| {
             replay_gain::configure_resources(app.path().resource_dir()?);
             let paths = resolve_data_paths(&app.handle()).map_err(std::io::Error::other)?;
             if let Err(error) = logging::init(&paths.logs) {
@@ -92,9 +106,20 @@ pub fn run() {
             app.state::<AppState>()
                 .batch_manager
                 .recover(app.handle().clone());
-            startup.finish(&Ok::<(),String>(()));
             tray::init(&app.handle());
             tray::intercept_close(&app.handle());
+            #[cfg(desktop)]
+            if let Some(window) = app.get_webview_window("main") {
+                use tauri_plugin_window_state::WindowExt;
+                if let Err(error) = window.restore_state(window_state_flags) {
+                    logging::event(log::Level::Warn, "window", "state.restore_failed", serde_json::json!({"error":error.to_string()}));
+                }
+                window.show()?;
+                if let Err(error) = window.set_focus() {
+                    logging::event(log::Level::Warn, "window", "focus.failed", serde_json::json!({"error":error.to_string()}));
+                }
+            }
+            startup.finish(&Ok::<(),String>(()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

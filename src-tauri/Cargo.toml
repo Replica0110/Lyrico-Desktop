@@ -48,6 +48,7 @@ regex = "1.13.1"
 roxmltree = { version = "0.21.1", default-features = false, features = ["std"] }
 ferrous-opencc = "0.4.0"
 tauri-plugin-sharehub = "0.1.3"
+tauri-plugin-window-state = "2"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
