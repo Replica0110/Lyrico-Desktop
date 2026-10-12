@@ -130,12 +130,10 @@ pub(crate) fn save_desktop_settings(
     settings: DesktopSettings,
 ) -> Result<(), String> {
     let settings = normalize_settings(settings);
-    let close_to_tray = settings.close_to_tray;
     let mut config = load_config(app)?;
     config.schema_version = CONFIG_SCHEMA_VERSION;
     config.settings = settings;
     write_json(&resolve_data_paths(app)?.settings, &config)?;
-    crate::tray::sync_visibility(app, close_to_tray);
     Ok(())
 }
 
@@ -415,9 +413,7 @@ pub(crate) fn import_config(
         settings: backup.settings,
     };
     config.settings = normalize_settings(config.settings);
-    let close_to_tray = config.settings.close_to_tray;
     write_json(&resolve_data_paths(app)?.settings, &config)?;
-    crate::tray::sync_visibility(app, close_to_tray);
     Ok((load_desktop_settings(app)?, backup.plugins))
 }
 

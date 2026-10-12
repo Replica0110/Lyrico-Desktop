@@ -25,7 +25,7 @@ fn log_tray(level: log::Level, name: &str, error: impl std::fmt::Display) {
     );
 }
 
-/// 按设置创建托盘图标并注册状态；创建失败只记日志，不影响启动。
+/// 应用运行期间始终显示托盘；创建失败只记日志，不影响启动。
 pub(crate) fn init(app: &AppHandle) {
     let labels = Labels {
         show: "打开主界面".to_string(),
@@ -39,13 +39,7 @@ pub(crate) fn init(app: &AppHandle) {
         }
     };
     if let Some(icon) = &icon {
-        let visible = crate::config::load_desktop_settings(app)
-            .map(|settings| settings.close_to_tray)
-            .unwrap_or_else(|error| {
-                log_tray(log::Level::Warn, "settings.load.failed", error);
-                false
-            });
-        if let Err(error) = icon.set_visible(visible) {
+        if let Err(error) = icon.set_visible(true) {
             log_tray(log::Level::Warn, "tray.visible.failed", error);
         }
     }
@@ -100,18 +94,6 @@ pub(crate) fn intercept_close(app: &AppHandle) {
             }
         }
     });
-}
-
-/// 同步托盘图标可见性（保存/导入设置后调用）。
-pub(crate) fn sync_visibility(app: &AppHandle, visible: bool) {
-    let Some(state) = app.try_state::<TrayState>() else {
-        return;
-    };
-    if let Some(icon) = &state.icon {
-        if let Err(error) = icon.set_visible(visible) {
-            log_tray(log::Level::Warn, "tray.visible.failed", error);
-        }
-    }
 }
 
 /// 更新托盘右键菜单文案（界面语言变化时由前端调用）。
