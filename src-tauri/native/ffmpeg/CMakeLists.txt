@@ -5,9 +5,10 @@ find_package(Git REQUIRED)
 execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/upstream"
   OUTPUT_VARIABLE revision OUTPUT_STRIP_TRAILING_WHITESPACE RESULT_VARIABLE git_status)
-if(NOT git_status EQUAL 0 OR NOT revision STREQUAL "1041abdc962f4cc4f394aa8de9dc5236c0c3b9e7")
+if(NOT git_status EQUAL 0 OR NOT revision STREQUAL "f2bf7a2440d1e49023e4b3ed0e224a8806d388b8")
   message(FATAL_ERROR "Initialize the pinned FFmpeg submodule: git submodule update --init --recursive")
 endif()
+file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/ffmpeg-revision" CONTENT "${revision}\n" @ONLY)
 if(CMAKE_CROSSCOMPILING)
   message(FATAL_ERROR "Build FFmpeg on the target operating system and architecture")
 endif()
@@ -72,7 +73,8 @@ ExternalProject_Add(ffmpeg
   LIST_SEPARATOR "|"
   BUILD_ALWAYS TRUE)
 ExternalProject_Add_StepDependencies(ffmpeg configure "${CMAKE_CURRENT_SOURCE_DIR}/build.sh"
-  "${CMAKE_CURRENT_SOURCE_DIR}/cl-deps.sh")
+  "${CMAKE_CURRENT_SOURCE_DIR}/cl-deps.sh"
+  "${CMAKE_CURRENT_BINARY_DIR}/ffmpeg-revision")
 add_library(lyrico_ffmpeg_bridge SHARED bridge.c)
 add_dependencies(lyrico_ffmpeg_bridge ffmpeg)
 target_include_directories(lyrico_ffmpeg_bridge PRIVATE "${prefix}/include")

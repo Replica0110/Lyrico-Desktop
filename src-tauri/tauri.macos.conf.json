@@ -9,10 +9,10 @@
     "macOS": {
       "frameworks": [
         "native/ffmpeg/runtime/liblyrico_ffmpeg_bridge.dylib",
-        "native/ffmpeg/runtime/libavformat.62.dylib",
-        "native/ffmpeg/runtime/libavcodec.62.dylib",
-        "native/ffmpeg/runtime/libavutil.60.dylib",
-        "native/ffmpeg/runtime/libswresample.6.dylib"
+        "native/ffmpeg/runtime/libavformat.63.dylib",
+        "native/ffmpeg/runtime/libavcodec.63.dylib",
+        "native/ffmpeg/runtime/libavutil.61.dylib",
+        "native/ffmpeg/runtime/libswresample.7.dylib"
       ]
     }
   }
