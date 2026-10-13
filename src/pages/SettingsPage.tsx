@@ -197,7 +197,7 @@ export function SettingsPage({
               label: t("settings.audio"),
               icon: <AudioOutlined />,
               children: (
-                <SettingsSection title={t("settings.replayGain")}>
+                <SettingsSection title={t("settings.audio")}>
                   <SettingRow title={t("settings.replayGainTarget")} description={t("settings.replayGainTargetHint")}>
                     <Flex gap={8} align="center">
                       <InputNumber
@@ -256,8 +256,9 @@ export function SettingsPage({
   );
 }
 
-function SettingsSection({ title, children }: { title: string; children: ReactNode }) {
-  return <section className="settings-section"><Typography.Title level={4}>{title}</Typography.Title>{children}</section>;
+/** Title is optional: the About tab leads with the app identity instead of a section heading. */
+function SettingsSection({ title, children }: { title?: string; children: ReactNode }) {
+  return <section className="settings-section">{title ? <Typography.Title level={4}>{title}</Typography.Title> : null}{children}</section>;
 }
 
 /**
@@ -508,20 +509,8 @@ function AppLogsSection() {
   </SettingsSection>;
 }
 
-const OPEN_SOURCE_DEPENDENCIES = [
-  { name: "Tauri", license: "Apache-2.0 OR MIT" },
-  { name: "React / React DOM", license: "MIT" },
-  { name: "Ant Design", license: "MIT" },
-  { name: "i18next / react-i18next", license: "MIT" },
-  { name: "rusqlite", license: "MIT" },
-  { name: "symphonia", license: "MPL-2.0" },
-  { name: "ebur128", license: "MIT" },
-  { name: "TagLib", license: "LGPL-2.1 OR MPL-1.1" },
-  { name: "rquickjs", license: "MIT" },
-  { name: "reqwest", license: "MIT OR Apache-2.0" },
-  { name: "image", license: "MIT OR Apache-2.0" },
-  { name: "rayon", license: "MIT OR Apache-2.0" },
-];
+const PROJECT_URL = "https://github.com/Replica0110/Lyrico-Desktop";
+const SPONSOR_URL = "https://ifdian.net/a/replica0110";
 
 function AboutSection() {
   const { t } = useTranslation();
@@ -534,24 +523,30 @@ function AboutSection() {
   }, []);
 
   return (
-    <section className="about-page">
-      <img className="about-app-icon" src={appIcon} alt="" />
-      <Typography.Title level={2}>Lyrico</Typography.Title>
-      <Text type="secondary">{t("settings.version")} {version || "—"}</Text>
-      <Typography.Paragraph>{t("settings.aboutDescription")}</Typography.Paragraph>
-      <div className="about-links">
-        <Button type="link" onClick={() => void openUrl("https://github.com/Replica0110/Lyrico-Desktop")}>{t("settings.projectHomepage")}</Button>
-        <Button type="link" onClick={() => void openUrl("https://github.com/Replica0110/Lyrico-Desktop/issues")}>{t("settings.reportIssue")}</Button>
-      </div>
-      <section className="about-section">
-        <Typography.Title level={3}>{t("settings.contributors")}</Typography.Title>
+    <>
+      <SettingsSection>
+        <div className="about-identity">
+          <img className="about-app-icon" src={appIcon} alt="" />
+          <div className="about-identity-copy">
+            <Typography.Title level={4}>Lyrico</Typography.Title>
+            <Text type="secondary">{t("settings.aboutDescription")}</Text>
+          </div>
+        </div>
+        <SettingRow title={t("settings.version")}><Text>{version || "—"}</Text></SettingRow>
+        <SettingRow title={t("settings.projectHomepage")}>
+          <Button onClick={() => void openUrl(PROJECT_URL)}>GitHub</Button>
+        </SettingRow>
+        <SettingRow title={t("settings.reportIssue")}>
+          <Button onClick={() => void openUrl(`${PROJECT_URL}/issues`)}>{t("settings.aboutSubmitIssue")}</Button>
+        </SettingRow>
+        <SettingRow title={t("settings.aboutSupport")}>
+          <Button onClick={() => void openUrl(SPONSOR_URL)}>{t("settings.aboutSupportAction")}</Button>
+        </SettingRow>
+      </SettingsSection>
+      <SettingsSection title={t("settings.contributors")}>
         <ContributorsSection />
-      </section>
-      <section className="about-section">
-        <Typography.Title level={3}>{t("settings.openSourceLicenses")}</Typography.Title>
-        <ul className="about-license-list">{OPEN_SOURCE_DEPENDENCIES.map(dependency => <li key={dependency.name}><Text>{dependency.name}</Text><Text type="secondary">{dependency.license}</Text></li>)}</ul>
-      </section>
-    </section>
+      </SettingsSection>
+    </>
   );
 }
 

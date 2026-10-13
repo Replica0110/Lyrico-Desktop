@@ -1364,14 +1364,6 @@ html[data-theme="dark"] .app-content {
   background: var(--app-bg);
 }
 
-.about-license-list {
-  margin: 0;
-  padding-left: 20px;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 4px 20px;
-}
-
 /* Progress bar: one implementation for global strips and in-panel progress. */
 .progress-bar {
   position: relative;
@@ -1470,15 +1462,12 @@ html[data-theme="dark"] .app-content {
 .artist-rule-list { display: flex; flex-direction: column; gap: 8px; }
 /* Separators are one or two characters: keep their rows compact. */
 .artist-rule-list.is-compact .ant-input { max-width: 140px; }
-.about-page { max-width: 600px; margin: 0 auto; padding: 20px; text-align: center; }
-.about-page > h2 { margin: 12px 0 4px; }
-.about-page > .ant-typography { display: block; }
-.about-page > .ant-typography + .ant-typography { margin-top: 12px; }
+/* Sits inside a `.settings-section`, so it inherits that padding and width. The gap below replaces
+   the heading margin it took over from. */
+.about-identity { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
 .about-app-icon { width: 48px; height: 48px; object-fit: contain; }
-.about-section { text-align: left; margin-top: 28px; }
-.about-section > h3 { font-size: 16px; margin: 0 0 16px; }
-.about-license-list { list-style: none; padding: 0; }
-.about-license-list > li { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding-block: 6px; }
+.about-identity-copy { display: flex; min-width: 0; flex-direction: column; }
+.about-identity-copy > h4 { margin: 0; }
 .selection-page { height: 100%; }
 .selection-search { width: 220px; margin-left: auto; }
 .selection-album { width: 180px; }
@@ -1487,8 +1476,6 @@ html[data-theme="dark"] .app-content {
   .selection-album { display: none; }
 }
 @media (max-width: 760px) { .tag-field-grid { grid-template-columns: minmax(0, 1fr); } }
-
-.about-links { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
 
 .batch-busy-note { display: flex; align-items: center; justify-content: space-between; gap: var(--list-gap); flex: 0 0 auto; font-size: 12px; }
 .batch-field-value { flex: 1; min-width: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
