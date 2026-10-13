@@ -29,7 +29,8 @@
   "bundle": {
     "active": true,
     "resources": {
-      "native/ffmpeg/runtime/": "ffmpeg/"
+      "native/ffmpeg/runtime/": "ffmpeg/",
+      "resources/THIRD_PARTY_NOTICES.txt": "THIRD_PARTY_NOTICES.txt"
     },
     "windows": {
       "nsis": {
