@@ -12,7 +12,7 @@ import {
   TagsOutlined,
   TeamOutlined,
 } from "@ant-design/icons";
-import { Badge, Button, Flex, Input, Layout, Popover, Tooltip, Typography } from "antd";
+import { Badge, Button, Flex, Input, Layout, Popover, Tag, Tooltip, Typography } from "antd";
 import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { AudioTrack, LibraryFolder, ReplayGainProgress, ScanProgress, ViewKey } from "../app/types";
@@ -118,6 +118,10 @@ export const Shell = memo(function Shell({
         collapsed={collapsed}
         trigger={null}
       >
+        {__DEBUG_BUILD__ && <div className="debug-brand">
+          {!collapsed && <Text strong>Lyrico</Text>}
+          <Tag color="orange" variant="solid" aria-label={t("common.debugBuild")}>DEBUG</Tag>
+        </div>}
         <nav className="side-navigation" aria-label={t("nav.primary")}>
           {navigationGroups.map((group) => <section className="side-nav-group" key={group.label}>
             {!collapsed ? <Text className="side-nav-label" type="secondary">{group.label}</Text> : null}

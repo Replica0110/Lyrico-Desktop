@@ -1,5 +1,6 @@
 mod audio;
 mod batch;
+mod build_identity;
 mod commands;
 mod config;
 mod database;
@@ -111,6 +112,7 @@ pub fn run() {
             #[cfg(desktop)]
             if let Some(window) = app.get_webview_window("main") {
                 use tauri_plugin_window_state::WindowExt;
+                window.set_title(build_identity::DISPLAY_NAME)?;
                 if let Err(error) = window.restore_state(window_state_flags) {
                     logging::event(log::Level::Warn, "window", "state.restore_failed", serde_json::json!({"error":error.to_string()}));
                 }
@@ -179,7 +181,7 @@ pub fn run() {
             extract_plain_lyrics_text,
             detect_lyrics_format
         ])
-        .build(tauri::generate_context!())
+        .build(build_identity::context())
         .expect("error while building tauri application")
         .run(|_, event| {
             if let tauri::RunEvent::Exit = event {

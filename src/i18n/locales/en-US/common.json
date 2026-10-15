@@ -1,5 +1,6 @@
 {
   "common": {
+    "debugBuild": "Debug build",
     "songs": "Songs",
     "albums": "Albums",
     "artists": "Artists",

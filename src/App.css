@@ -195,6 +195,24 @@ textarea {
   overflow-y: auto;
 }
 
+.debug-brand {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px 0;
+}
+
+.debug-brand .ant-tag {
+  margin: 0;
+  font-weight: 600;
+}
+
+.side-panel.ant-layout-sider-collapsed .debug-brand {
+  justify-content: center;
+  padding-inline: 0;
+}
+
 .side-nav-group + .side-nav-group {
   margin-top: 16px;
 }

@@ -1,5 +1,6 @@
 {
   "common": {
+    "debugBuild": "调试版本",
     "songs": "歌曲",
     "albums": "专辑",
     "artists": "艺术家",

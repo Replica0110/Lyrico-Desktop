@@ -5,8 +5,12 @@ import process from "node:process";
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
-export default defineConfig(() => ({
+export default defineConfig(({ command }) => ({
   plugins: [react()],
+  define: {
+    __DEBUG_BUILD__: JSON.stringify(process.env.TAURI_ENV_DEBUG === "true"
+      || (process.env.TAURI_ENV_DEBUG === undefined && command === "serve")),
+  },
 
   build: {
     target: "es2021",

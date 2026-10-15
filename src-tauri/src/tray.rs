@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, Wry};
 
@@ -147,7 +147,7 @@ fn build_tray(app: &AppHandle, labels: &Labels) -> Result<TrayIcon<Wry>, String>
     let menu = build_menu(app, labels)?;
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)
-        .tooltip("Lyrico")
+        .tooltip(crate::build_identity::DISPLAY_NAME)
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -170,11 +170,21 @@ fn build_tray(app: &AppHandle, labels: &Labels) -> Result<TrayIcon<Wry>, String>
 }
 
 fn build_menu(app: &AppHandle, labels: &Labels) -> Result<Menu<Wry>, String> {
+    let identity_item = MenuItem::with_id(
+        app,
+        "identity",
+        crate::build_identity::DISPLAY_NAME,
+        false,
+        None::<&str>,
+    )
+    .map_err(|error| error.to_string())?;
+    let separator = PredefinedMenuItem::separator(app).map_err(|error| error.to_string())?;
     let show_item = MenuItem::with_id(app, "show", &labels.show, true, None::<&str>)
         .map_err(|error| error.to_string())?;
     let quit_item = MenuItem::with_id(app, "quit", &labels.quit, true, None::<&str>)
         .map_err(|error| error.to_string())?;
-    Menu::with_items(app, &[&show_item, &quit_item]).map_err(|error| error.to_string())
+    Menu::with_items(app, &[&identity_item, &separator, &show_item, &quit_item])
+        .map_err(|error| error.to_string())
 }
 
 pub(crate) fn show_main_window(app: &AppHandle) {
